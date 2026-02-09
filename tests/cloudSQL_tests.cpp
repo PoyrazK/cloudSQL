@@ -139,7 +139,7 @@ TEST(LexerTest_SelectKeyword) {
         tokens.push_back(lexer.next_token());
     }
     
-    EXPECT_EQ(tokens.size(), 4);
+    EXPECT_EQ(tokens.size(), static_cast<size_t>(4));
     EXPECT_EQ(tokens[0].type(), TokenType::Select);
     EXPECT_EQ(tokens[1].type(), TokenType::Star);
     EXPECT_EQ(tokens[2].type(), TokenType::From);
@@ -202,7 +202,7 @@ TEST(LexerTest_ComplexQuery) {
     }
     
     // Basic validation - tokens should be generated
-    EXPECT_GE(tokens.size(), 10);
+    EXPECT_GE(tokens.size(), static_cast<size_t>(10));
     EXPECT_EQ(tokens[0].type(), TokenType::Select);
     EXPECT_EQ(tokens[1].type(), TokenType::Identifier);  // id
     EXPECT_EQ(tokens[2].type(), TokenType::Comma);

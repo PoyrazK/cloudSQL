@@ -87,7 +87,7 @@ public:
         : name_(std::move(name)), table_name_() {}
     
     ColumnExpr(std::string table, std::string name)
-        : table_name_(std::move(table)), name_(std::move(name)) {}
+        : name_(std::move(name)), table_name_(std::move(table)) {}
     
     ExprType type() const override { return ExprType::Column; }
     const std::string& name() const { return name_; }
