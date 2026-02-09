@@ -1,0 +1,90 @@
+# cloudSQL .gitignore
+
+# ==============
+# Build Artifacts
+# ==============
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Compiled binaries
+sqlEngine
+sqlEngine_tests
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.pdb
+*.idb
+*.ilk
+*.o
+*.obj
+*.a
+
+# ==============
+# IDE Files
+# ==============
+.vscode/
+.idea/
+*.suo
+*.user
+*.ncb
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.opensdf
+*.sdf
+
+# ==============
+# OS Files
+# ==============
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==============
+# Editor Swap Files
+# ==============
+*.swp
+*.swo
+*~
+.#*
+*~.save
+
+# ==============
+# Temporary Files
+# ==============
+*.tmp
+*.log
+*.out
+*.pid
+*.seed
+
+# ==============
+# Coverage/Testing
+# ==============
+coverage/
+*.gcno
+*.gcda
+*.gcov
+
+# ==============
+# Backup Files
+# ==============
+*.bak
+*.backup
+*.orig
+*.rej
+
+# ==============
+# Emacs
+# ==============
+.emacs.d/
