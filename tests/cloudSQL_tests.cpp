@@ -12,6 +12,7 @@
 #include "parser/token.hpp"
 #include "parser/lexer.hpp"
 #include "parser/expression.hpp"
+#include "common/config.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::common;
@@ -247,6 +248,41 @@ TEST(ExpressionTest_UnaryExpression) {
     EXPECT_EQ(expr->type(), ExprType::Unary);
 }
 
+// ============= Config Tests =============
+
+TEST(ConfigTest_DefaultValues) {
+    config::Config config;
+    EXPECT_EQ(config.port, config::Config::DEFAULT_PORT);
+    EXPECT_STREQ(config.data_dir.c_str(), config::Config::DEFAULT_DATA_DIR);
+    EXPECT_EQ(config.mode, config::RunMode::Embedded);
+    EXPECT_EQ(config.max_connections, config::Config::DEFAULT_MAX_CONNECTIONS);
+}
+
+TEST(ConfigTest_Setters) {
+    config::Config config;
+    config.port = 8080;
+    config.data_dir = "/var/data";
+    config.mode = config::RunMode::Distributed;
+    config.debug = true;
+    
+    EXPECT_EQ(config.port, static_cast<uint16_t>(8080));
+    EXPECT_STREQ(config.data_dir.c_str(), "/var/data");
+    EXPECT_EQ(config.mode, config::RunMode::Distributed);
+    EXPECT_TRUE(config.debug);
+}
+
+TEST(ConfigTest_Validate) {
+    config::Config config;
+    EXPECT_TRUE(config.validate());
+    
+    config.port = 0;  // Invalid port
+    EXPECT_FALSE(config.validate());
+    
+    config.port = 8080;
+    config.data_dir = "";  // Empty data dir
+    EXPECT_FALSE(config.validate());
+}
+
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
@@ -278,6 +314,12 @@ int main() {
     RUN_TEST(ExpressionTest_ColumnExpression);
     RUN_TEST(ExpressionTest_BinaryExpression);
     RUN_TEST(ExpressionTest_UnaryExpression);
+    std::cout << std::endl;
+    
+    std::cout << "Config Tests:" << std::endl;
+    RUN_TEST(ConfigTest_DefaultValues);
+    RUN_TEST(ConfigTest_Setters);
+    RUN_TEST(ConfigTest_Validate);
     std::cout << std::endl;
     
     std::cout << "========================" << std::endl;
