@@ -13,6 +13,7 @@
 #include "parser/lexer.hpp"
 #include "parser/expression.hpp"
 #include "common/config.hpp"
+#include "catalog/catalog.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::common;
@@ -283,6 +284,67 @@ TEST(ConfigTest_Validate) {
     EXPECT_FALSE(config.validate());
 }
 
+// ============= Catalog Tests =============
+
+TEST(CatalogTest_CreateTable) {
+    auto catalog = cloudsql::Catalog::create();
+    
+    std::vector<cloudsql::ColumnInfo> columns;
+    columns.push_back(cloudsql::ColumnInfo("id", cloudsql::ValueType::Int64, 1));
+    columns.push_back(cloudsql::ColumnInfo("name", cloudsql::ValueType::Text, 2));
+    
+    auto table_id = catalog->create_table("users", std::move(columns));
+    EXPECT_TRUE(table_id > 0);
+    
+    auto table = catalog->get_table(table_id);
+    EXPECT_TRUE(table.has_value());
+    EXPECT_STREQ((*table)->name.c_str(), "users");
+    EXPECT_EQ((*table)->num_columns(), static_cast<uint16_t>(2));
+}
+
+TEST(CatalogTest_GetTableByName) {
+    auto catalog = cloudsql::Catalog::create();
+    
+    std::vector<cloudsql::ColumnInfo> columns;
+    columns.push_back(cloudsql::ColumnInfo("id", cloudsql::ValueType::Int64, 1));
+    
+    catalog->create_table("products", std::move(columns));
+    
+    auto table = catalog->get_table_by_name("products");
+    EXPECT_TRUE(table.has_value());
+    EXPECT_STREQ((*table)->name.c_str(), "products");
+}
+
+TEST(CatalogTest_DropTable) {
+    auto catalog = cloudsql::Catalog::create();
+    
+    std::vector<cloudsql::ColumnInfo> columns;
+    columns.push_back(cloudsql::ColumnInfo("id", cloudsql::ValueType::Int64, 1));
+    
+    auto table_id = catalog->create_table("temp", std::move(columns));
+    EXPECT_TRUE(catalog->table_exists(table_id));
+    
+    catalog->drop_table(table_id);
+    EXPECT_FALSE(catalog->table_exists(table_id));
+}
+
+TEST(CatalogTest_CreateIndex) {
+    auto catalog = cloudsql::Catalog::create();
+    
+    std::vector<cloudsql::ColumnInfo> columns;
+    columns.push_back(cloudsql::ColumnInfo("id", cloudsql::ValueType::Int64, 1));
+    columns.push_back(cloudsql::ColumnInfo("email", cloudsql::ValueType::Text, 2));
+    
+    auto table_id = catalog->create_table("accounts", std::move(columns));
+    
+    auto index_id = catalog->create_index("idx_email", table_id, {2}, 
+                                           cloudsql::IndexType::BTree, true);
+    EXPECT_TRUE(index_id > 0);
+    
+    auto indexes = catalog->get_table_indexes(table_id);
+    EXPECT_EQ(indexes.size(), static_cast<size_t>(1));
+}
+
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
@@ -320,6 +382,13 @@ int main() {
     RUN_TEST(ConfigTest_DefaultValues);
     RUN_TEST(ConfigTest_Setters);
     RUN_TEST(ConfigTest_Validate);
+    std::cout << std::endl;
+    
+    std::cout << "Catalog Tests:" << std::endl;
+    RUN_TEST(CatalogTest_CreateTable);
+    RUN_TEST(CatalogTest_GetTableByName);
+    RUN_TEST(CatalogTest_DropTable);
+    RUN_TEST(CatalogTest_CreateIndex);
     std::cout << std::endl;
     
     std::cout << "========================" << std::endl;

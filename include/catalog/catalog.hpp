@@ -201,6 +201,11 @@ public:
 class Catalog {
 public:
     /**
+     * @brief Default constructor
+     */
+    Catalog() : next_oid_(1) {}
+    
+    /**
      * @brief Create a new catalog
      */
     static std::unique_ptr<Catalog> create() {
@@ -436,16 +441,20 @@ public:
         std::cout << "======================" << std::endl;
     }
 
+    /**
+     * @brief Get catalog version
+     */
+    uint64_t get_version() const { return version_; }
+
 private:
-    Catalog() : next_oid_(1) {}
+    std::unordered_map<oid_t, std::unique_ptr<TableInfo>> tables_;
+    DatabaseInfo database_;
+    oid_t next_oid_;
+    uint64_t version_ = 1;
 
     static uint64_t get_current_time() {
         return static_cast<uint64_t>(std::time(nullptr));
     }
-
-    std::unordered_map<oid_t, std::unique_ptr<TableInfo>> tables_;
-    DatabaseInfo database_;
-    oid_t next_oid_;
 };
 
 } // namespace cloudsql
