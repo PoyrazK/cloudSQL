@@ -75,6 +75,8 @@ typedef enum {
     TOKEN_UNIQUE,
     TOKEN_CHECK,
     TOKEN_DEFAULT,
+    TOKEN_EXISTS,
+    TOKEN_VARCHAR,
     
     /* Identifiers and literals */
     TOKEN_IDENTIFIER,
