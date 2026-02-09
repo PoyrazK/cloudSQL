@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/common.h"
 #include "parser/ast.h"
 #include "parser/lexer.h"
 
@@ -184,7 +185,7 @@ static ast_expression_t *parse_compare(parser_t *parser) {
             node->left = left;
             node->right = right;
             left = node;
-        } else if (tok->type == TOKEN_IS) {
+        } else if (tok.type == TOKEN_IS) {
             next_token(parser);
             bool is_not = false;
             token_t *next = peek_token(parser);
@@ -199,7 +200,7 @@ static ast_expression_t *parse_compare(parser_t *parser) {
             node->expr = right;
             node->not_flag = is_not;
             left = node;
-        } else if (tok->type == TOKEN_LIKE) {
+        } else if (tok.type == TOKEN_LIKE) {
             next_token(parser);
             ast_expression_t *right = parse_add_sub(parser);
             ast_expression_t *node = ALLOC_ZERO(sizeof(ast_expression_t));
@@ -207,7 +208,7 @@ static ast_expression_t *parse_compare(parser_t *parser) {
             node->left = left;
             node->right = right;
             return node;
-        } else if (tok->type == TOKEN_IN) {
+        } else if (tok.type == TOKEN_IN) {
             next_token(parser);
             bool is_not = false;
             token_t *next = peek_token(parser);
@@ -347,24 +348,24 @@ static ast_expression_t *parse_primary(parser_t *parser) {
     }
     
     /* Number */
-    if (tok->type == TOKEN_NUMBER) {
+    if (tok.type == TOKEN_NUMBER) {
         next_token(parser);
         ast_expression_t *node = ALLOC_ZERO(sizeof(ast_expression_t));
         node->type = EXPR_CONSTANT;
         
-        if (tok->value.float_val != (double)(int64_t)tok->value.float_val) {
+        if (tok->value.float64_val != (double)(int64_t)tok->value.float64_val) {
             node->value.type = TYPE_FLOAT64;
-            node->value.float64_val = tok->value.float_val;
+            node->value.float64_val = tok->value.float64_val;
         } else {
             node->value.type = TYPE_INT64;
-            node->value.int64_val = tok->value.int_val;
+            node->value.int64_val = tok->value.int64_val;
         }
         
         return node;
     }
     
     /* String */
-    if (tok->type == TOKEN_STRING) {
+    if (tok.type == TOKEN_STRING) {
         next_token(parser);
         ast_expression_t *node = ALLOC_ZERO(sizeof(ast_expression_t));
         node->type = EXPR_CONSTANT;
@@ -374,7 +375,7 @@ static ast_expression_t *parse_primary(parser_t *parser) {
     }
     
     /* Parenthesized expression or subquery */
-    if (tok->type == TOKEN_LPAREN) {
+    if (tok.type == TOKEN_LPAREN) {
         next_token(parser);
         
         /* Check for subquery */
@@ -391,8 +392,8 @@ static ast_expression_t *parse_primary(parser_t *parser) {
     }
     
     /* Identifier (column reference or function call) */
-    if (tok->type == TOKEN_IDENTIFIER) {
-        char *name = STRDUP(tok->lexeme);
+    if (tok.type == TOKEN_IDENTIFIER) {
+        char *name = STRDUP(tok.lexeme);
         next_token(parser);
         
         token_t *peek = peek_token(parser);
@@ -471,7 +472,7 @@ static ast_node_t *parse_select(parser_t *parser) {
     
     /* DISTINCT */
     tok = peek_token(parser);
-    if (tok->type == TOKEN_DISTINCT) {
+    if (tok.type == TOKEN_DISTINCT) {
         next_token(parser);
         select->distinct = true;
     }
@@ -487,7 +488,7 @@ static ast_node_t *parse_select(parser_t *parser) {
             select->columns[select->num_columns++] = col;
             
             tok = peek_token(parser);
-            if (tok->type == TOKEN_COMMA) {
+            if (tok.type == TOKEN_COMMA) {
                 next_token(parser);
             } else {
                 break;
@@ -503,14 +504,14 @@ static ast_node_t *parse_select(parser_t *parser) {
     
     /* Table */
     tok = next_token(parser);
-    if (tok->type != TOKEN_IDENTIFIER) {
+    if (tok.type != TOKEN_IDENTIFIER) {
         parser->error_message = "Expected table name";
         FREE(select);
         return NULL;
     }
     select->from_clause = ALLOC_ZERO(sizeof(ast_expression_t));
     select->from_clause->type = EXPR_COLUMN;
-    select->from_clause->column_name = STRDUP(tok->lexeme);
+    select->from_clause->column_name = STRDUP(tok.lexeme);
     
     /* WHERE */
     select->where_clause = parser_parse_where(parser);
@@ -533,14 +534,14 @@ static ast_node_t *parse_select(parser_t *parser) {
  * @brief Parse column definition
  */
 static column_def_t *parse_column_def(parser_t *parser) {
-    token_t *tok = next_token(parser);
+    token_t tok = next_token(parser);
     
-    if (tok->type != TOKEN_IDENTIFIER) {
+    if (tok.type != TOKEN_IDENTIFIER) {
         return NULL;
     }
     
     column_def_t *col = ALLOC_ZERO(sizeof(column_def_t));
-    col->name = STRDUP(tok->lexeme);
+    col->name = STRDUP(tok.lexeme);
     col->nullable = true;
     col->is_primary_key = false;
     col->is_unique = false;
@@ -548,35 +549,35 @@ static column_def_t *parse_column_def(parser_t *parser) {
     
     /* Data type */
     tok = next_token(parser);
-    if (tok->type == TOKEN_IDENTIFIER || tok->type == TOKEN_VARCHAR) {
-        if (strcasecmp(tok->lexeme, "INT") == 0 || 
-            strcasecmp(tok->lexeme, "INTEGER") == 0) {
+    if (tok.type == TOKEN_IDENTIFIER || tok.type == TOKEN_VARCHAR) {
+        if (strcasecmp(tok.lexeme, "INT") == 0 || 
+            strcasecmp(tok.lexeme, "INTEGER") == 0) {
             col->type = TYPE_INT32;
-        } else if (strcasecmp(tok->lexeme, "BIGINT") == 0) {
+        } else if (strcasecmp(tok.lexeme, "BIGINT") == 0) {
             col->type = TYPE_INT64;
-        } else if (strcasecmp(tok->lexeme, "SMALLINT") == 0) {
+        } else if (strcasecmp(tok.lexeme, "SMALLINT") == 0) {
             col->type = TYPE_INT16;
-        } else if (strcasecmp(tok->lexeme, "FLOAT") == 0 || 
-                   strcasecmp(tok->lexeme, "DOUBLE") == 0) {
+        } else if (strcasecmp(tok.lexeme, "FLOAT") == 0 || 
+                   strcasecmp(tok.lexeme, "DOUBLE") == 0) {
             col->type = TYPE_FLOAT64;
-        } else if (strcasecmp(tok->lexeme, "VARCHAR") == 0) {
+        } else if (strcasecmp(tok.lexeme, "VARCHAR") == 0) {
             col->type = TYPE_VARCHAR;
             consume_token(parser, TOKEN_LPAREN);
             tok = next_token(parser);
-            if (tok->type == TOKEN_NUMBER) {
-                col->max_length = tok->value.int_val;
+            if (tok.type == TOKEN_NUMBER) {
+                col->max_length = tok->value.int64_val;
             }
             consume_token(parser, TOKEN_RPAREN);
-        } else if (strcasecmp(tok->lexeme, "TEXT") == 0) {
+        } else if (strcasecmp(tok.lexeme, "TEXT") == 0) {
             col->type = TYPE_TEXT;
-        } else if (strcasecmp(tok->lexeme, "BOOLEAN") == 0 || 
-                   strcasecmp(tok->lexeme, "BOOL") == 0) {
+        } else if (strcasecmp(tok.lexeme, "BOOLEAN") == 0 || 
+                   strcasecmp(tok.lexeme, "BOOL") == 0) {
             col->type = TYPE_BOOL;
-        } else if (strcasecmp(tok->lexeme, "DATE") == 0) {
+        } else if (strcasecmp(tok.lexeme, "DATE") == 0) {
             col->type = TYPE_DATE;
-        } else if (strcasecmp(tok->lexeme, "TIMESTAMP") == 0) {
+        } else if (strcasecmp(tok.lexeme, "TIMESTAMP") == 0) {
             col->type = TYPE_TIMESTAMP;
-        } else if (strcasecmp(tok->lexeme, "JSON") == 0) {
+        } else if (strcasecmp(tok.lexeme, "JSON") == 0) {
             col->type = TYPE_JSON;
         } else {
             col->type = TYPE_TEXT;  /* Default */
@@ -587,22 +588,22 @@ static column_def_t *parse_column_def(parser_t *parser) {
     while (true) {
         tok = peek_token(parser);
         
-        if (tok->type == TOKEN_PRIMARY) {
+        if (tok.type == TOKEN_PRIMARY) {
             next_token(parser);
             consume_token(parser, TOKEN_KEY);
             col->is_primary_key = true;
             col->nullable = false;
-        } else if (tok->type == TOKEN_NOT) {
+        } else if (tok.type == TOKEN_NOT) {
             next_token(parser);
             tok = next_token(parser);
-            if (tok->type == TOKEN_NULL) {
+            if (tok.type == TOKEN_NULL) {
                 col->nullable = false;
             }
-        } else if (tok->type == TOKEN_DEFAULT) {
+        } else if (tok.type == TOKEN_DEFAULT) {
             next_token(parser);
             ast_expression_t *def = parse_or(parser);
             col->default_value = def;
-        } else if (tok->type == TOKEN_COMMA || tok->type == TOKEN_RPAREN) {
+        } else if (tok.type == TOKEN_COMMA || tok.type == TOKEN_RPAREN) {
             break;
         } else {
             break;
@@ -640,11 +641,11 @@ static ast_node_t *parse_create_table(parser_t *parser) {
     
     /* Table name */
     tok = next_token(parser);
-    if (tok->type != TOKEN_IDENTIFIER) {
+    if (tok.type != TOKEN_IDENTIFIER) {
         FREE(create);
         return NULL;
     }
-    create->table_name = STRDUP(tok->lexeme);
+    create->table_name = STRDUP(tok.lexeme);
     
     /* Columns */
     consume_token(parser, TOKEN_LPAREN);
@@ -661,7 +662,7 @@ static ast_node_t *parse_create_table(parser_t *parser) {
         }
         
         tok = peek_token(parser);
-        if (tok->type == TOKEN_COMMA) {
+        if (tok.type == TOKEN_COMMA) {
             next_token(parser);
         } else {
             break;
@@ -705,7 +706,7 @@ static ast_node_t *parse_drop_table(parser_t *parser) {
         FREE(drop);
         return NULL;
     }
-    drop->table_name = STRDUP(tok->lexeme);
+    drop->table_name = STRDUP(tok.lexeme);
     
     ast_node_t *node = ALLOC_ZERO(sizeof(ast_node_t));
     node->type = AST_DROP_TABLE;
@@ -735,14 +736,14 @@ ast_node_t *parser_parse_statement(parser_t *parser) {
         case TOKEN_CREATE:
             next_token(parser);  /* Consume CREATE */
             tok = peek_token(parser);
-            if (tok->type == TOKEN_TABLE) {
+            if (tok.type == TOKEN_TABLE) {
                 return parse_create_table(parser);
             }
             break;
         case TOKEN_DROP:
             next_token(parser);  /* Consume DROP */
             tok = peek_token(parser);
-            if (tok->type == TOKEN_TABLE) {
+            if (tok.type == TOKEN_TABLE) {
                 return parse_drop_table(parser);
             }
             break;
