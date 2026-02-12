@@ -1,12 +1,26 @@
+/**
+ * @file server.cpp
+ * @brief PostgreSQL wire protocol implementation
+ *
+ * @defgroup network Network Server
+ * @{
+ */
+
 #include "network/server.hpp"
 
 namespace cloudsql {
 namespace network {
 
+/**
+ * @brief Create a new server instance
+ */
 std::unique_ptr<Server> Server::create(uint16_t port) {
     return std::make_unique<Server>(port);
 }
 
+/**
+ * @brief Start the server
+ */
 bool Server::start() {
     if (running_.load()) {
         return false;
@@ -42,6 +56,9 @@ bool Server::start() {
     return true;
 }
 
+/**
+ * @brief Stop the server
+ */
 bool Server::stop() {
     if (!running_.load()) {
         return true;
@@ -50,13 +67,7 @@ bool Server::stop() {
     status_ = ServerStatus::Stopping;
     running_ = false;
 
-    // Connect to self to unblock accept() if needed, or close socket
-    // Simple close(listen_fd_) might not wake up accept() on all platforms immediately
-    // or might cause undefined behavior if another thread is using it.
-    // For this simple implementation, closing and joining is the standard approach
-    // although slightly race-prone without proper shutdown signaling.
-    
-    // Using shutdown to signal
+    /* Signal shutdown */
     shutdown(listen_fd_, SHUT_RDWR);
     close(listen_fd_);
     listen_fd_ = -1;
@@ -69,12 +80,18 @@ bool Server::stop() {
     return true;
 }
 
+/**
+ * @brief Wait for server to stop
+ */
 void Server::wait() {
     if (accept_thread_.joinable()) {
         accept_thread_.join();
     }
 }
 
+/**
+ * @brief Get status string
+ */
 std::string Server::get_status_string() const {
     switch (status_) {
         case ServerStatus::Stopped: return "Stopped";
@@ -86,6 +103,9 @@ std::string Server::get_status_string() const {
     }
 }
 
+/**
+ * @brief Accept incoming connections
+ */
 void Server::accept_connections() {
     while (running_.load()) {
         struct sockaddr_in client_addr;
@@ -93,7 +113,6 @@ void Server::accept_connections() {
 
         int client_fd = accept(listen_fd_, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd < 0) {
-            // Check if we are still running, if not, it was likely closed by stop()
             if (!running_.load()) break;
             continue;
         }
@@ -101,6 +120,7 @@ void Server::accept_connections() {
         stats_.connections_accepted.fetch_add(1);
         stats_.connections_active.fetch_add(1);
 
+        /* Handle connection in a new thread */
         std::thread([this, client_fd]() {
             handle_connection(client_fd);
             stats_.connections_active.fetch_sub(1);
@@ -108,6 +128,9 @@ void Server::accept_connections() {
     }
 }
 
+/**
+ * @brief Handle a client connection
+ */
 void Server::handle_connection(int client_fd) {
     char buffer[4096];
     std::string query;
@@ -122,6 +145,7 @@ void Server::handle_connection(int client_fd) {
         stats_.bytes_received.fetch_add(bytes_read);
         query += buffer;
 
+        /* Basic query delimiter check */
         if (query.find(';') != std::string::npos) {
             stats_.queries_executed.fetch_add(1);
             query.clear();
@@ -133,3 +157,5 @@ void Server::handle_connection(int client_fd) {
 
 } // namespace network
 } // namespace cloudsql
+
+/** @} */ /* network */

@@ -1,12 +1,26 @@
+/**
+ * @file catalog.cpp
+ * @brief System Catalog implementation
+ *
+ * @defgroup catalog System Catalog
+ * @{
+ */
+
 #include "catalog/catalog.hpp"
 #include <ctime>
 
 namespace cloudsql {
 
+/**
+ * @brief Create a new catalog
+ */
 std::unique_ptr<Catalog> Catalog::create() {
     return std::make_unique<Catalog>();
 }
 
+/**
+ * @brief Load catalog from file
+ */
 bool Catalog::load(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -23,21 +37,24 @@ bool Catalog::load(const std::string& filename) {
     return true;
 }
 
+/**
+ * @brief Save catalog to file
+ */
 bool Catalog::save(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Cannot open catalog file for writing: " << filename << std::endl;
         return false;
     }
-    file << "# System Catalog
-";
-    file << "# Auto-generated
-
-";
+    file << "# System Catalog\n";
+    file << "# Auto-generated\n\n";
     file.close();
     return true;
 }
 
+/**
+ * @brief Create a new table
+ */
 oid_t Catalog::create_table(const std::string& table_name, 
                    std::vector<ColumnInfo> columns) {
     TableInfo table;
@@ -50,6 +67,9 @@ oid_t Catalog::create_table(const std::string& table_name,
     return table.table_id;
 }
 
+/**
+ * @brief Drop a table
+ */
 bool Catalog::drop_table(oid_t table_id) {
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
@@ -59,6 +79,9 @@ bool Catalog::drop_table(oid_t table_id) {
     return false;
 }
 
+/**
+ * @brief Get table by ID
+ */
 std::optional<TableInfo*> Catalog::get_table(oid_t table_id) {
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
@@ -67,6 +90,9 @@ std::optional<TableInfo*> Catalog::get_table(oid_t table_id) {
     return std::nullopt;
 }
 
+/**
+ * @brief Get table by name
+ */
 std::optional<TableInfo*> Catalog::get_table_by_name(const std::string& table_name) {
     for (auto& pair : tables_) {
         if (pair.second->name == table_name) {
@@ -76,6 +102,9 @@ std::optional<TableInfo*> Catalog::get_table_by_name(const std::string& table_na
     return std::nullopt;
 }
 
+/**
+ * @brief Get all tables
+ */
 std::vector<TableInfo*> Catalog::get_all_tables() {
     std::vector<TableInfo*> result;
     for (auto& pair : tables_) {
@@ -84,6 +113,9 @@ std::vector<TableInfo*> Catalog::get_all_tables() {
     return result;
 }
 
+/**
+ * @brief Create an index
+ */
 oid_t Catalog::create_index(const std::string& index_name, oid_t table_id,
                    std::vector<uint16_t> column_positions,
                    IndexType index_type, bool is_unique) {
@@ -104,6 +136,9 @@ oid_t Catalog::create_index(const std::string& index_name, oid_t table_id,
     return index.index_id;
 }
 
+/**
+ * @brief Drop an index
+ */
 bool Catalog::drop_index(oid_t index_id) {
     // Search through all tables to find and remove the index
     for (auto& pair : tables_) {
@@ -118,6 +153,9 @@ bool Catalog::drop_index(oid_t index_id) {
     return false;
 }
 
+/**
+ * @brief Get index by ID
+ */
 std::optional<std::pair<TableInfo*, IndexInfo*>> Catalog::get_index(oid_t index_id) {
     for (auto& pair : tables_) {
         for (auto& index : pair.second->indexes) {
@@ -129,6 +167,9 @@ std::optional<std::pair<TableInfo*, IndexInfo*>> Catalog::get_index(oid_t index_
     return std::nullopt;
 }
 
+/**
+ * @brief Get indexes for a table
+ */
 std::vector<IndexInfo*> Catalog::get_table_indexes(oid_t table_id) {
     std::vector<IndexInfo*> result;
     auto table = get_table(table_id);
@@ -140,6 +181,9 @@ std::vector<IndexInfo*> Catalog::get_table_indexes(oid_t table_id) {
     return result;
 }
 
+/**
+ * @brief Update table statistics
+ */
 bool Catalog::update_table_stats(oid_t table_id, uint64_t num_rows) {
     auto table = get_table(table_id);
     if (table.has_value()) {
@@ -150,10 +194,16 @@ bool Catalog::update_table_stats(oid_t table_id, uint64_t num_rows) {
     return false;
 }
 
+/**
+ * @brief Check if table exists
+ */
 bool Catalog::table_exists(oid_t table_id) const {
     return tables_.find(table_id) != tables_.end();
 }
 
+/**
+ * @brief Check if table exists by name
+ */
 bool Catalog::table_exists_by_name(const std::string& table_name) const {
     for (const auto& pair : tables_) {
         if (pair.second->name == table_name) {
@@ -163,6 +213,9 @@ bool Catalog::table_exists_by_name(const std::string& table_name) const {
     return false;
 }
 
+/**
+ * @brief Print catalog contents
+ */
 void Catalog::print() const {
     std::cout << "=== System Catalog ===" << std::endl;
     std::cout << "Database: " << database_.name << std::endl;
@@ -183,3 +236,5 @@ uint64_t Catalog::get_current_time() {
 }
 
 } // namespace cloudsql
+
+/** @} */ /* catalog */
