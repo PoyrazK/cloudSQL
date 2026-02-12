@@ -18,6 +18,7 @@
 #include "catalog/catalog.hpp"
 #include "network/server.hpp"
 #include "storage/heap_table.hpp"
+#include "storage/btree_index.hpp"
 #include "storage/storage_manager.hpp"
 #include "executor/operator.hpp"
 #include "executor/query_executor.hpp"
@@ -113,12 +114,46 @@ TEST(ExecutionTest_EndToEnd) {
     }
 }
 
+// ============= Index Tests =============
+
+TEST(IndexTest_BTreeBasic) {
+    std::remove("./test_data/idx_test.idx");
+    StorageManager sm("./test_data");
+    BTreeIndex idx("idx_test", sm, TYPE_INT64);
+    idx.create();
+
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(1, 1));
+    idx.insert(Value::make_int64(20), HeapTable::TupleId(1, 2));
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(2, 1));
+
+    auto res = idx.search(Value::make_int64(10));
+    EXPECT_EQ(res.size(), static_cast<size_t>(2));
+    EXPECT_EQ(res[0].page_num, 1);
+    EXPECT_EQ(res[1].page_num, 2);
+
+    auto res2 = idx.search(Value::make_int64(20));
+    EXPECT_EQ(res2.size(), static_cast<size_t>(1));
+    EXPECT_EQ(res2[0].slot_num, 2);
+
+    // Scan test
+    auto iter = idx.scan();
+    BTreeIndex::Entry entry;
+    int count = 0;
+    while (iter.next(entry)) {
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+
+    idx.drop();
+}
+
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
     
     RUN_TEST(ValueTest_Basic);
     RUN_TEST(ExecutionTest_EndToEnd);
+    RUN_TEST(IndexTest_BTreeBasic);
     
     std::cout << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;

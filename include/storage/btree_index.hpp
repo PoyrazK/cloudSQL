@@ -12,23 +12,42 @@
 #include <cstdint>
 #include "common/value.hpp"
 #include "storage/heap_table.hpp"
+#include "storage/storage_manager.hpp"
 
 namespace cloudsql {
 namespace storage {
 
 /**
- * @brief B-tree index for fast lookups
+ * @brief B+ Tree index for fast lookups
  */
 class BTreeIndex {
 public:
     /**
-     * @brief Index entry
+     * @brief Node types in the B+ Tree
+     */
+    enum class NodeType : uint8_t {
+        Leaf = 0,
+        Internal = 1
+    };
+
+    /**
+     * @brief Page header for B-tree nodes
+     */
+    struct NodeHeader {
+        NodeType type;
+        uint16_t num_keys;
+        uint32_t parent_page;
+        uint32_t next_leaf; // For leaf nodes
+    };
+
+    /**
+     * @brief Index entry (Key + TupleId)
      */
     struct Entry {
         common::Value key;
         HeapTable::TupleId tuple_id;
         
-        Entry() {}
+        Entry() = default;
         Entry(common::Value k, HeapTable::TupleId tid) : key(std::move(k)), tuple_id(tid) {}
     };
     
@@ -38,48 +57,38 @@ public:
     class Iterator {
     private:
         BTreeIndex& index_;
+        uint32_t current_page_;
+        uint16_t current_slot_;
         bool eof_ = false;
         
     public:
-        explicit Iterator(BTreeIndex& index) : index_(index) {}
+        Iterator(BTreeIndex& index, uint32_t page, uint16_t slot);
         
         bool next(Entry& out_entry);
         bool is_done() const { return eof_; }
     };
     
-    /**
-     * @brief Scan range bounds
-     */
-    struct Range {
-        std::unique_ptr<common::Value> min;
-        std::unique_ptr<common::Value> max;
-        
-        Range() = default;
-        Range(std::unique_ptr<common::Value> min_key, std::unique_ptr<common::Value> max_key)
-            : min(std::move(min_key)), max(std::move(max_key)) {}
-    };
-    
 private:
     std::string index_name_;
-    std::string table_name_;
+    std::string filename_;
+    StorageManager& storage_manager_;
     common::ValueType key_type_;
+    uint32_t root_page_ = 0;
     
 public:
-    BTreeIndex(std::string index_name, std::string table_name, common::ValueType key_type)
-        : index_name_(std::move(index_name)), table_name_(std::move(table_name)), key_type_(key_type) {}
+    BTreeIndex(std::string index_name, StorageManager& storage_manager, common::ValueType key_type);
     
     ~BTreeIndex() = default;
     
-    // Non-copyable
+    /* Non-copyable */
     BTreeIndex(const BTreeIndex&) = delete;
     BTreeIndex& operator=(const BTreeIndex&) = delete;
     
-    // Movable
+    /* Movable */
     BTreeIndex(BTreeIndex&&) noexcept = default;
     BTreeIndex& operator=(BTreeIndex&&) noexcept = default;
     
     const std::string& index_name() const { return index_name_; }
-    const std::string& table_name() const { return table_name_; }
     common::ValueType key_type() const { return key_type_; }
     
     bool create();
@@ -90,20 +99,21 @@ public:
     bool insert(const common::Value& key, HeapTable::TupleId tuple_id);
     bool remove(const common::Value& key, HeapTable::TupleId tuple_id);
     
-    std::vector<HeapTable::TupleId> search(const common::Value& key) const;
+    std::vector<HeapTable::TupleId> search(const common::Value& key);
     
-    std::vector<HeapTable::TupleId> range_search(
-        const std::unique_ptr<common::Value>& min_key,
-        const std::unique_ptr<common::Value>& max_key
-    ) const;
+    Iterator scan();
     
-    Iterator scan() { return Iterator(*this); }
-    Iterator range_scan(const Range& range) { (void)range; return Iterator(*this); }
-    
-    void get_stats(uint64_t& num_entries, int& depth, uint32_t& num_pages) const;
-    
-    bool verify() const;
     bool exists() const;
+
+private:
+    /* Internal B-tree logic */
+    uint32_t find_leaf(const common::Value& key);
+    void split_leaf(uint32_t page_num, char* buffer);
+    // void split_internal(...) // TODO phase 2
+    
+    bool read_page(uint32_t page_num, char* buffer) const;
+    bool write_page(uint32_t page_num, const char* buffer);
+    uint32_t allocate_page();
 };
 
 }  // namespace storage
