@@ -16,6 +16,7 @@
 #include <variant>
 #include <fstream>
 #include <iostream>
+#include "common/value.hpp"
 
 namespace cloudsql {
 
@@ -23,35 +24,12 @@ namespace cloudsql {
 using oid_t = uint32_t;
 
 /**
- * @brief Value types supported by the database (C++ enum)
- */
-enum class ValueType : uint8_t {
-    Null = 0,
-    Bool = 1,
-    Int8 = 2,
-    Int16 = 3,
-    Int32 = 4,
-    Int64 = 5,
-    Float32 = 6,
-    Float64 = 7,
-    Decimal = 8,
-    Char = 9,
-    Varchar = 10,
-    Text = 11,
-    Date = 12,
-    Time = 13,
-    Timestamp = 14,
-    Json = 15,
-    Blob = 16
-};
-
-/**
  * @brief Column information structure (C++ class)
  */
 class ColumnInfo {
 public:
     std::string name;
-    ValueType type;
+    common::ValueType type;
     uint16_t position;
     uint32_t max_length;
     bool nullable;
@@ -60,7 +38,7 @@ public:
     uint32_t flags;
 
     ColumnInfo() 
-        : type(ValueType::Null)
+        : type(common::TYPE_NULL)
         , position(0)
         , max_length(0)
         , nullable(true)
@@ -68,7 +46,7 @@ public:
         , flags(0)
     {}
 
-    ColumnInfo(std::string name, ValueType type, uint16_t pos)
+    ColumnInfo(std::string name, common::ValueType type, uint16_t pos)
         : name(std::move(name))
         , type(type)
         , position(pos)

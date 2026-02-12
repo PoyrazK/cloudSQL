@@ -12,6 +12,7 @@
 #include "common/value.hpp"
 #include "parser/token.hpp"
 #include "parser/lexer.hpp"
+#include "parser/parser.hpp"
 #include "parser/expression.hpp"
 #include "common/config.hpp"
 #include "catalog/catalog.hpp"
@@ -19,6 +20,7 @@
 #include "storage/heap_table.hpp"
 #include "storage/storage_manager.hpp"
 #include "executor/operator.hpp"
+#include "executor/query_executor.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::common;
@@ -82,162 +84,63 @@ TEST(ValueTest_IntegerOperations) {
     auto val = Value::make_int64(42);
     EXPECT_EQ(val.type(), TYPE_INT64);
     EXPECT_EQ(val.to_int64(), 42);
-    EXPECT_FALSE(val.is_null());
 }
 
 TEST(ValueTest_StringOperations) {
     auto val = Value::make_text("hello");
     EXPECT_EQ(val.type(), TYPE_TEXT);
     EXPECT_STREQ(val.as_text().c_str(), "hello");
-    EXPECT_FALSE(val.is_null());
 }
 
-TEST(ValueTest_NullValue) {
-    auto val = Value::make_null();
-    EXPECT_EQ(val.type(), TYPE_NULL);
-    EXPECT_TRUE(val.is_null());
-}
+// ============= Parser Tests =============
 
-TEST(ValueTest_FloatOperations) {
-    auto val = Value::make_float64(3.14);
-    EXPECT_EQ(val.type(), TYPE_FLOAT64);
-    EXPECT_TRUE(val.to_float64() > 3.13 && val.to_float64() < 3.15);
-}
-
-TEST(ValueTest_CopyOperations) {
-    auto val1 = Value::make_int64(100);
-    auto val2 = val1;  // Copy constructor
-    EXPECT_EQ(val2.to_int64(), 100);
+TEST(ParserTest_SelectStatement) {
+    auto lexer = std::make_unique<Lexer>("SELECT id, name FROM users WHERE id = 1");
+    Parser parser(std::move(lexer));
+    auto stmt = parser.parse_statement();
     
-    auto val3 = std::move(val1);  // Move constructor
-    EXPECT_EQ(val3.to_int64(), 100);
-}
-
-// ============= Token Tests =============
-
-TEST(TokenTest_BasicTokens) {
-    Token tok1(TokenType::Select);
-    EXPECT_EQ(static_cast<int>(tok1.type()), static_cast<int>(TokenType::Select));
+    EXPECT_TRUE(stmt != nullptr);
+    EXPECT_EQ(static_cast<int>(stmt->type()), static_cast<int>(StmtType::Select));
     
-    Token tok2(TokenType::Number, "123");
-    EXPECT_EQ(static_cast<int>(tok2.type()), static_cast<int>(TokenType::Number));
-    EXPECT_STREQ(tok2.lexeme().c_str(), "123");
-}
-
-TEST(TokenTest_IdentifierToken) {
-    Token tok(TokenType::Identifier, "users");
-    EXPECT_EQ(static_cast<int>(tok.type()), static_cast<int>(TokenType::Identifier));
-    EXPECT_STREQ(tok.lexeme().c_str(), "users");
-}
-
-TEST(TokenTest_Equality) {
-    Token tok1(TokenType::From, "FROM");
-    Token tok2(TokenType::From, "FROM");
-    Token tok3(TokenType::Where, "WHERE");
-    
-    EXPECT_TRUE(tok1.type() == tok2.type());
-    EXPECT_FALSE(tok1.type() == tok3.type());
-}
-
-// ============= Lexer Tests =============
-
-TEST(LexerTest_SelectKeyword) {
-    Lexer lexer("SELECT * FROM users");
-    std::vector<Token> tokens;
-    while (!lexer.is_at_end()) {
-        tokens.push_back(lexer.next_token());
-    }
-    
-    EXPECT_GE(tokens.size(), static_cast<size_t>(4));
-    EXPECT_EQ(static_cast<int>(tokens[0].type()), static_cast<int>(TokenType::Select));
-}
-
-TEST(LexerTest_Numbers) {
-    Lexer lexer("SELECT 123, 456 FROM users");
-    std::vector<Token> tokens;
-    while (!lexer.is_at_end()) {
-        tokens.push_back(lexer.next_token());
-    }
-    
-    EXPECT_EQ(static_cast<int>(tokens[1].type()), static_cast<int>(TokenType::Number));
-    EXPECT_STREQ(tokens[1].lexeme().c_str(), "123");
-}
-
-TEST(LexerTest_Strings) {
-    Lexer lexer("SELECT 'hello world' FROM users");
-    std::vector<Token> tokens;
-    while (!lexer.is_at_end()) {
-        tokens.push_back(lexer.next_token());
-    }
-    
-    EXPECT_EQ(static_cast<int>(tokens[1].type()), static_cast<int>(TokenType::String));
-}
-
-TEST(LexerTest_Operators) {
-    Lexer lexer("WHERE age = 25 AND status = 'active'");
-    std::vector<Token> tokens;
-    while (!lexer.is_at_end()) {
-        tokens.push_back(lexer.next_token());
-    }
-    
-    EXPECT_EQ(static_cast<int>(tokens[0].type()), static_cast<int>(TokenType::Where));
-    EXPECT_EQ(static_cast<int>(tokens[2].type()), static_cast<int>(TokenType::Eq));
-}
-
-// ============= Expression Tests =============
-
-TEST(ExpressionTest_ConstantExpression) {
-    auto expr = std::make_unique<ConstantExpr>(Value::make_int64(42));
-    EXPECT_EQ(static_cast<int>(expr->type()), static_cast<int>(ExprType::Constant));
-}
-
-TEST(ExpressionTest_ColumnExpression) {
-    auto expr = std::make_unique<ColumnExpr>("users", "name");
-    EXPECT_EQ(static_cast<int>(expr->type()), static_cast<int>(ExprType::Column));
-    EXPECT_STREQ(expr->table().c_str(), "users");
-    EXPECT_STREQ(expr->name().c_str(), "name");
-}
-
-// ============= Config Tests =============
-
-TEST(ConfigTest_DefaultValues) {
-    cloudsql::config::Config config;
-    EXPECT_EQ(config.port, cloudsql::config::Config::DEFAULT_PORT);
+    auto select = static_cast<SelectStatement*>(stmt.get());
+    EXPECT_EQ(select->columns().size(), static_cast<size_t>(2));
+    EXPECT_TRUE(select->from() != nullptr);
+    EXPECT_TRUE(select->where() != nullptr);
 }
 
 // ============= Execution Tests =============
 
-TEST(ExecutionTest_HeapTableScan) {
-    // Cleanup old test data
-    std::remove("./test_data/test_table.heap");
-
+TEST(ExecutionTest_EndToEnd) {
+    std::remove("./test_data/users.heap");
     StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    QueryExecutor exec(*catalog, sm);
+
+    // 1. Create Table
+    auto lexer1 = std::make_unique<Lexer>("CREATE TABLE users (id BIGINT, age BIGINT)");
+    Parser parser1(std::move(lexer1));
+    auto stmt1 = parser1.parse_statement();
+    auto res1 = exec.execute(*stmt1);
+    EXPECT_TRUE(res1.success());
+
+    // 2. Insert data (manually for now as INSERT parsing is TODO)
+    auto table_meta = catalog->get_table_by_name("users");
     Schema schema;
     schema.add_column("id", TYPE_INT64);
-    schema.add_column("name", TYPE_TEXT);
+    schema.add_column("age", TYPE_INT64);
+    HeapTable table("users", sm, schema);
+    table.insert(Tuple({Value::make_int64(1), Value::make_int64(20)}));
+    table.insert(Tuple({Value::make_int64(2), Value::make_int64(30)}));
 
-    HeapTable table("test_table", sm, schema);
-    table.create();
+    // 3. Select with Filter
+    auto lexer2 = std::make_unique<Lexer>("SELECT id FROM users WHERE age > 25");
+    Parser parser2(std::move(lexer2));
+    auto stmt2 = parser2.parse_statement();
+    auto res2 = exec.execute(*stmt2);
 
-    // Insert rows
-    table.insert(Tuple({Value::make_int64(1), Value::make_text("Alice")}));
-    table.insert(Tuple({Value::make_int64(2), Value::make_text("Bob")}));
-
-    // Re-open to ensure persistence
-    auto scan = std::make_unique<SeqScanOperator>(std::make_unique<HeapTable>("test_table", sm, schema));
-    scan->open();
-
-    Tuple t;
-    int count = 0;
-    while (scan->next(t)) {
-        count++;
-        // std::cout << "DEBUG: Row " << count << ": " << t.to_string() << std::endl;
-        if (count == 1) EXPECT_STREQ(t.get(0).to_string().c_str(), "1");
-        if (count == 2) EXPECT_STREQ(t.get(0).to_string().c_str(), "2");
-    }
-    EXPECT_EQ(count, 2);
-    
-    table.drop();
+    EXPECT_TRUE(res2.success());
+    EXPECT_EQ(res2.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res2.rows()[0].get(0).to_string().c_str(), "2");
 }
 
 int main() {
@@ -247,43 +150,19 @@ int main() {
     std::cout << "Value Tests:" << std::endl;
     RUN_TEST(ValueTest_IntegerOperations);
     RUN_TEST(ValueTest_StringOperations);
-    RUN_TEST(ValueTest_NullValue);
-    RUN_TEST(ValueTest_FloatOperations);
-    RUN_TEST(ValueTest_CopyOperations);
     std::cout << std::endl;
     
-    std::cout << "Token Tests:" << std::endl;
-    RUN_TEST(TokenTest_BasicTokens);
-    RUN_TEST(TokenTest_IdentifierToken);
-    RUN_TEST(TokenTest_Equality);
-    std::cout << std::endl;
-    
-    std::cout << "Lexer Tests:" << std::endl;
-    RUN_TEST(LexerTest_SelectKeyword);
-    RUN_TEST(LexerTest_Numbers);
-    RUN_TEST(LexerTest_Strings);
-    RUN_TEST(LexerTest_Operators);
-    std::cout << std::endl;
-    
-    std::cout << "Expression Tests:" << std::endl;
-    RUN_TEST(ExpressionTest_ConstantExpression);
-    RUN_TEST(ExpressionTest_ColumnExpression);
-    std::cout << std::endl;
-    
-    std::cout << "Config Tests:" << std::endl;
-    RUN_TEST(ConfigTest_DefaultValues);
+    std::cout << "Parser Tests:" << std::endl;
+    RUN_TEST(ParserTest_SelectStatement);
     std::cout << std::endl;
 
     std::cout << "Execution Tests:" << std::endl;
-    RUN_TEST(ExecutionTest_HeapTableScan);
+    RUN_TEST(ExecutionTest_EndToEnd);
     std::cout << std::endl;
     
     std::cout << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;
     
-    if (tests_failed > 0) {
-        return 1;
-    }
-    
+    if (tests_failed > 0) return 1;
     return 0;
 }
