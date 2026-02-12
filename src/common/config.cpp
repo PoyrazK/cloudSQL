@@ -1,3 +1,11 @@
+/**
+ * @file config.cpp
+ * @brief Configuration implementation
+ *
+ * @defgroup config Configuration
+ * @{
+ */
+
 #include "common/config.hpp"
 #include <iostream>
 #include <fstream>
@@ -6,6 +14,9 @@
 namespace cloudsql {
 namespace config {
 
+/**
+ * @brief Default constructor with default values
+ */
 Config::Config()
     : port(DEFAULT_PORT)
     , data_dir(DEFAULT_DATA_DIR)
@@ -18,6 +29,9 @@ Config::Config()
     , verbose(false)
 {}
 
+/**
+ * @brief Load configuration from file
+ */
 bool Config::load(const std::string& filename) {
     if (filename.empty()) {
         return false;
@@ -31,13 +45,12 @@ bool Config::load(const std::string& filename) {
 
     std::string line;
     while (std::getline(file, line)) {
-        // Skip empty lines and comments
-        if (line.empty() || line[0] == '#' || line[0] == '
-') {
+        /* Skip empty lines and comments */
+        if (line.empty() || line[0] == '#' || line[0] == '\r') {
             continue;
         }
 
-        // Parse key=value
+        /* Parse key=value */
         auto eq_pos = line.find('=');
         if (eq_pos == std::string::npos) {
             continue;
@@ -50,7 +63,7 @@ bool Config::load(const std::string& filename) {
             continue;
         }
 
-        // Parse configuration options
+        /* Parse configuration options */
         if (key == "port") {
             port = static_cast<uint16_t>(std::stoi(value));
         } else if (key == "data_dir") {
@@ -74,6 +87,9 @@ bool Config::load(const std::string& filename) {
     return true;
 }
 
+/**
+ * @brief Save configuration to file
+ */
 bool Config::save(const std::string& filename) const {
     if (filename.empty()) {
         return false;
@@ -85,33 +101,25 @@ bool Config::save(const std::string& filename) const {
         return false;
     }
 
-    file << "# SQL Engine Configuration
-";
-    file << "# Auto-generated
+    file << "# SQL Engine Configuration\n";
+    file << "# Auto-generated\n\n";
 
-";
-
-    file << "port=" << port << "
-";
-    file << "data_dir=" << data_dir << "
-";
-    file << "max_connections=" << max_connections << "
-";
-    file << "buffer_pool_size=" << buffer_pool_size << "
-";
-    file << "page_size=" << page_size << "
-";
-    file << "mode=" << (mode == RunMode::Distributed ? "distributed" : "embedded") << "
-";
-    file << "debug=" << (debug ? "true" : "false") << "
-";
-    file << "verbose=" << (verbose ? "true" : "false") << "
-";
+    file << "port=" << port << "\n";
+    file << "data_dir=" << data_dir << "\n";
+    file << "max_connections=" << max_connections << "\n";
+    file << "buffer_pool_size=" << buffer_pool_size << "\n";
+    file << "page_size=" << page_size << "\n";
+    file << "mode=" << (mode == RunMode::Distributed ? "distributed" : "embedded") << "\n";
+    file << "debug=" << (debug ? "true" : "false") << "\n";
+    file << "verbose=" << (verbose ? "true" : "false") << "\n";
 
     file.close();
     return true;
 }
 
+/**
+ * @brief Validate configuration
+ */
 bool Config::validate() const {
     if (port == 0 || port > 65535) {
         std::cerr << "Invalid port number: " << port << std::endl;
@@ -141,6 +149,9 @@ bool Config::validate() const {
     return true;
 }
 
+/**
+ * @brief Print configuration to stdout
+ */
 void Config::print() const {
     std::cout << "=== SQL Engine Configuration ===" << std::endl;
     std::cout << "Mode:         " << (mode == RunMode::Distributed ? "distributed" : "embedded") << std::endl;
@@ -154,18 +165,19 @@ void Config::print() const {
     std::cout << "================================" << std::endl;
 }
 
+/**
+ * @brief Trim whitespace from string
+ */
 std::string Config::trim(const std::string& str) {
-    size_t start = str.find_first_not_of(" 	
-
-");
+    size_t start = str.find_first_not_of(" \t\n\r");
     if (start == std::string::npos) {
         return "";
     }
-    size_t end = str.find_last_not_of(" 	
-
-");
+    size_t end = str.find_last_not_of(" \t\n\r");
     return str.substr(start, end - start + 1);
 }
 
 } // namespace config
 } // namespace cloudsql
+
+/** @} */ /* config */
