@@ -9,8 +9,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <optional>
 #include "executor/types.hpp"
 #include "parser/expression.hpp"
+#include "storage/heap_table.hpp"
 
 namespace cloudsql {
 namespace executor {
@@ -87,21 +89,18 @@ public:
 class SeqScanOperator : public Operator {
 private:
     std::string table_name_;
+    std::unique_ptr<storage::HeapTable> table_;
+    std::unique_ptr<storage::HeapTable::Iterator> iterator_;
     Schema schema_;
-    std::vector<Tuple> tuples_;
-    size_t current_index_ = 0;
     
 public:
-    explicit SeqScanOperator(std::string table_name)
-        : Operator(OperatorType::SeqScan), table_name_(std::move(table_name)) {}
+    explicit SeqScanOperator(std::unique_ptr<storage::HeapTable> table);
     
     bool init() override;
     bool open() override;
     bool next(Tuple& out_tuple) override;
     void close() override;
     Schema& output_schema() override;
-    
-    void set_tuples(std::vector<Tuple> tuples) { tuples_ = std::move(tuples); }
     const std::string& table_name() const { return table_name_; }
 };
 
@@ -113,11 +112,9 @@ private:
     std::unique_ptr<Operator> child_;
     std::unique_ptr<parser::Expression> condition_;
     Schema schema_;
-    Tuple current_tuple_;
     
 public:
-    FilterOperator(std::unique_ptr<Operator> child, std::unique_ptr<parser::Expression> condition)
-        : Operator(OperatorType::Filter), child_(std::move(child)), condition_(std::move(condition)) {}
+    FilterOperator(std::unique_ptr<Operator> child, std::unique_ptr<parser::Expression> condition);
     
     bool init() override;
     bool open() override;
@@ -137,8 +134,7 @@ private:
     Schema schema_;
     
 public:
-    ProjectOperator(std::unique_ptr<Operator> child, std::vector<std::unique_ptr<parser::Expression>> columns)
-        : Operator(OperatorType::Project), child_(std::move(child)), columns_(std::move(columns)) {}
+    ProjectOperator(std::unique_ptr<Operator> child, std::vector<std::unique_ptr<parser::Expression>> columns);
     
     bool init() override;
     bool open() override;
@@ -164,9 +160,7 @@ private:
 public:
     HashJoinOperator(std::unique_ptr<Operator> left, std::unique_ptr<Operator> right,
                      std::unique_ptr<parser::Expression> left_key, 
-                     std::unique_ptr<parser::Expression> right_key)
-        : Operator(OperatorType::HashJoin), left_(std::move(left)), right_(std::move(right)),
-          left_key_(std::move(left_key)), right_key_(std::move(right_key)) {}
+                     std::unique_ptr<parser::Expression> right_key);
     
     bool init() override;
     bool open() override;
@@ -187,8 +181,7 @@ private:
     uint64_t current_count_ = 0;
     
 public:
-    LimitOperator(std::unique_ptr<Operator> child, uint64_t limit, uint64_t offset = 0)
-        : Operator(OperatorType::Limit), child_(std::move(child)), limit_(limit), offset_(offset) {}
+    LimitOperator(std::unique_ptr<Operator> child, uint64_t limit, uint64_t offset = 0);
     
     bool init() override;
     bool open() override;

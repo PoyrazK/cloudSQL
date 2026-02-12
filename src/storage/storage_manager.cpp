@@ -45,12 +45,16 @@ bool StorageManager::open_file(const std::string& filename) {
     std::string filepath = data_dir_ + "/" + filename;
     auto file = std::make_unique<std::fstream>();
     
-    /* Open for read/write in binary mode, create if not exists */
-    file->open(filepath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+    /* Open for read/write in binary mode. Do NOT use std::ios::app as it breaks random access writes. */
+    file->open(filepath, std::ios::in | std::ios::out | std::ios::binary);
     
     if (!file->is_open()) {
         /* Fallback: create empty file then reopen */
         file->open(filepath, std::ios::out | std::ios::binary);
+        if (!file->is_open()) {
+            std::cerr << "Failed to create file: " << filepath << std::endl;
+            return false;
+        }
         file->close();
         file->open(filepath, std::ios::in | std::ios::out | std::ios::binary);
     }
@@ -88,15 +92,22 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
     }
 
     auto& file = open_files_[filename];
-    file->seekg(page_num * PAGE_SIZE, std::ios::beg);
-    if (file->fail()) return false;
+    file->clear(); // Clear EOF/fail bits before seek
+    file->seekg(static_cast<std::streamoff>(page_num) * PAGE_SIZE, std::ios::beg);
+    
+    if (file->fail()) {
+        /* If we sought past the end, it's effectively an empty page for now */
+        std::fill(buffer, buffer + PAGE_SIZE, 0);
+        return true;
+    }
 
     file->read(buffer, PAGE_SIZE);
     
     if (file->gcount() != PAGE_SIZE) {
         if (file->eof()) {
-            file->clear(); 
-            std::fill(buffer, buffer + PAGE_SIZE, 0); 
+            /* Partial read at EOF: zero-fill the rest */
+            std::fill(buffer + file->gcount(), buffer + PAGE_SIZE, 0);
+            file->clear();
             return true;
         }
         return false;
@@ -116,7 +127,9 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num, 
     }
 
     auto& file = open_files_[filename];
-    file->seekp(page_num * PAGE_SIZE, std::ios::beg);
+    file->clear(); // Clear bits
+    file->seekp(static_cast<std::streamoff>(page_num) * PAGE_SIZE, std::ios::beg);
+    
     if (file->fail()) return false;
 
     file->write(buffer, PAGE_SIZE);
