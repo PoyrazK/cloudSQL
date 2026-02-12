@@ -1,8 +1,16 @@
+/**
+ * @file btree_index.cpp
+ * @brief B-tree index implementation
+ */
+
 #include "storage/btree_index.hpp"
 
 namespace cloudsql {
 namespace storage {
 
+/**
+ * @brief Get next entry from index scan
+ */
 bool BTreeIndex::Iterator::next(Entry& out_entry) { 
     (void)out_entry; 
     return false; 
@@ -13,23 +21,35 @@ bool BTreeIndex::open() { return true; }
 void BTreeIndex::close() {}
 bool BTreeIndex::drop() { return true; }
 
+/**
+ * @brief Insert a key into the index
+ */
 bool BTreeIndex::insert(const common::Value& key, HeapTable::TupleId tuple_id) { 
     (void)key; 
     (void)tuple_id; 
     return true; 
 }
 
+/**
+ * @brief Remove a key from the index
+ */
 bool BTreeIndex::remove(const common::Value& key, HeapTable::TupleId tuple_id) { 
     (void)key; 
     (void)tuple_id; 
     return true; 
 }
 
+/**
+ * @brief Search for a key in the index
+ */
 std::vector<HeapTable::TupleId> BTreeIndex::search(const common::Value& key) const { 
     (void)key; 
     return {}; 
 }
 
+/**
+ * @brief Search for a range of keys in the index
+ */
 std::vector<HeapTable::TupleId> BTreeIndex::range_search(
     const std::unique_ptr<common::Value>& min_key,
     const std::unique_ptr<common::Value>& max_key

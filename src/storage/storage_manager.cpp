@@ -1,16 +1,31 @@
+/**
+ * @file storage_manager.cpp
+ * @brief Storage manager implementation
+ *
+ * @defgroup storage Storage Manager
+ * @{
+ */
+
 #include "storage/storage_manager.hpp"
 #include <iostream>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <algorithm>
 
 namespace cloudsql {
 namespace storage {
 
+/**
+ * @brief Construct a new Storage Manager
+ */
 StorageManager::StorageManager(std::string data_dir) 
     : data_dir_(std::move(data_dir)) {
     create_dir_if_not_exists();
 }
 
+/**
+ * @brief Destroy the Storage Manager and close all files
+ */
 StorageManager::~StorageManager() {
     for (auto& pair : open_files_) {
         if (pair.second->is_open()) {
@@ -19,17 +34,22 @@ StorageManager::~StorageManager() {
     }
 }
 
+/**
+ * @brief Open a database file
+ */
 bool StorageManager::open_file(const std::string& filename) {
     if (open_files_.find(filename) != open_files_.end()) {
-        return true; // Already open
+        return true; 
     }
 
     std::string filepath = data_dir_ + "/" + filename;
     auto file = std::make_unique<std::fstream>();
+    
+    /* Open for read/write in binary mode, create if not exists */
     file->open(filepath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     
     if (!file->is_open()) {
-        // Try creating if it doesn't exist
+        /* Fallback: create empty file then reopen */
         file->open(filepath, std::ios::out | std::ios::binary);
         file->close();
         file->open(filepath, std::ios::in | std::ios::out | std::ios::binary);
@@ -45,6 +65,9 @@ bool StorageManager::open_file(const std::string& filename) {
     return true;
 }
 
+/**
+ * @brief Close a database file
+ */
 bool StorageManager::close_file(const std::string& filename) {
     auto it = open_files_.find(filename);
     if (it == open_files_.end()) {
@@ -56,6 +79,9 @@ bool StorageManager::close_file(const std::string& filename) {
     return true;
 }
 
+/**
+ * @brief Read a page from storage
+ */
 bool StorageManager::read_page(const std::string& filename, uint32_t page_num, char* buffer) {
     if (open_files_.find(filename) == open_files_.end()) {
         if (!open_file(filename)) return false;
@@ -68,10 +94,9 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
     file->read(buffer, PAGE_SIZE);
     
     if (file->gcount() != PAGE_SIZE) {
-        // Handle partial read or EOF
         if (file->eof()) {
-            file->clear(); // Clear EOF flag
-            std::fill(buffer, buffer + PAGE_SIZE, 0); // Zero fill if new page
+            file->clear(); 
+            std::fill(buffer, buffer + PAGE_SIZE, 0); 
             return true;
         }
         return false;
@@ -82,6 +107,9 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
     return true;
 }
 
+/**
+ * @brief Write a page to storage
+ */
 bool StorageManager::write_page(const std::string& filename, uint32_t page_num, const char* buffer) {
     if (open_files_.find(filename) == open_files_.end()) {
         if (!open_file(filename)) return false;
@@ -101,6 +129,9 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num, 
     return true;
 }
 
+/**
+ * @brief Create data directory if it doesn't exist
+ */
 bool StorageManager::create_dir_if_not_exists() {
     struct stat st;
     if (stat(data_dir_.c_str(), &st) != 0) {
@@ -114,3 +145,5 @@ bool StorageManager::create_dir_if_not_exists() {
 
 } // namespace storage
 } // namespace cloudsql
+
+/** @} */ /* storage */

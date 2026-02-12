@@ -1,12 +1,18 @@
+/**
+ * @file operator.cpp
+ * @brief Query Executor Operators implementation
+ *
+ * @defgroup executor Query Executor
+ * @{
+ */
+
 #include "executor/operator.hpp"
 
 namespace cloudsql {
 namespace executor {
 
-// Operator Base
-// (Virtual methods default implementation provided in header or overridden)
+/* --- SeqScanOperator --- */
 
-// SeqScanOperator
 bool SeqScanOperator::init() {
     // Initialize schema from table metadata would go here
     return true;
@@ -33,7 +39,8 @@ void SeqScanOperator::close() {
 
 Schema& SeqScanOperator::output_schema() { return schema_; }
 
-// FilterOperator
+/* --- FilterOperator --- */
+
 bool FilterOperator::init() {
     return child_->init();
 }
@@ -64,7 +71,8 @@ Schema& FilterOperator::output_schema() { return schema_; }
 
 void FilterOperator::add_child(std::unique_ptr<Operator> child) { child_ = std::move(child); }
 
-// ProjectOperator
+/* --- ProjectOperator --- */
+
 bool ProjectOperator::init() {
     return child_->init();
 }
@@ -100,13 +108,14 @@ Schema& ProjectOperator::output_schema() { return schema_; }
 
 void ProjectOperator::add_child(std::unique_ptr<Operator> child) { child_ = std::move(child); }
 
-// HashJoinOperator
+/* --- HashJoinOperator --- */
+
 bool HashJoinOperator::init() {
     return left_->init() && right_->init();
 }
 
 bool HashJoinOperator::open() {
-    // Build hash table from right side
+    /* Build phase: scan right side into hash table */
     Tuple right_tuple;
     while (right_->next(right_tuple)) {
         // Build hash table entries
@@ -120,7 +129,7 @@ bool HashJoinOperator::next(Tuple& out_tuple) {
         state_ = ExecState::Done;
         return false;
     }
-    // Concatenate left and right tuples
+    /* Probe phase: return joined results */
     out_tuple = results_[current_index_++];
     return true;
 }
@@ -141,7 +150,8 @@ void HashJoinOperator::add_child(std::unique_ptr<Operator> child) {
     }
 }
 
-// LimitOperator
+/* --- LimitOperator --- */
+
 bool LimitOperator::init() {
     return child_->init();
 }
@@ -149,7 +159,7 @@ bool LimitOperator::init() {
 bool LimitOperator::open() {
     if (!child_->open()) return false;
     
-    // Skip offset rows
+    /* Skip offset rows */
     Tuple tuple;
     while (current_count_ < offset_ && child_->next(tuple)) {
         current_count_++;
@@ -185,3 +195,5 @@ void LimitOperator::add_child(std::unique_ptr<Operator> child) { child_ = std::m
 
 }  // namespace executor
 }  // namespace cloudsql
+
+/** @} */ /* executor */

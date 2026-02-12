@@ -1,29 +1,49 @@
+/**
+ * @file heap_table.cpp
+ * @brief Heap table storage implementation
+ */
+
 #include "storage/heap_table.hpp"
 
 namespace cloudsql {
 namespace storage {
 
+/**
+ * @brief Get next tuple from scan
+ */
 bool HeapTable::Iterator::next(executor::Tuple& out_tuple) { 
     (void)out_tuple; 
     return false; 
 }
 
+/**
+ * @brief Insert a tuple into the table
+ */
 HeapTable::TupleId HeapTable::insert(const executor::Tuple& tuple) { 
     (void)tuple; 
     return TupleId(); 
 }
 
+/**
+ * @brief Remove a tuple from the table
+ */
 bool HeapTable::remove(const TupleId& tuple_id) { 
     (void)tuple_id; 
     return true; 
 }
 
+/**
+ * @brief Update a tuple in the table
+ */
 bool HeapTable::update(const TupleId& tuple_id, const executor::Tuple& tuple) { 
     (void)tuple_id; 
     (void)tuple; 
     return true; 
 }
 
+/**
+ * @brief Get a specific tuple by ID
+ */
 bool HeapTable::get(const TupleId& tuple_id, executor::Tuple& out_tuple) const { 
     (void)tuple_id; 
     (void)out_tuple; 
