@@ -1,8 +1,16 @@
+/**
+ * @file statement.cpp
+ * @brief SQL Statement implementation
+ */
+
 #include "parser/statement.hpp"
 
 namespace cloudsql {
 namespace parser {
 
+/**
+ * @brief Convert SELECT statement to string
+ */
 std::string SelectStatement::to_string() const {
     std::string result = "SELECT ";
     
@@ -58,6 +66,9 @@ std::string SelectStatement::to_string() const {
     return result;
 }
 
+/**
+ * @brief Convert INSERT statement to string
+ */
 std::string InsertStatement::to_string() const {
     std::string result = "INSERT INTO " + table_->to_string() + " (";
     
@@ -86,6 +97,9 @@ std::string InsertStatement::to_string() const {
     return result;
 }
 
+/**
+ * @brief Convert UPDATE statement to string
+ */
 std::string UpdateStatement::to_string() const {
     std::string result = "UPDATE " + table_->to_string() + " SET ";
     
@@ -103,6 +117,9 @@ std::string UpdateStatement::to_string() const {
     return result;
 }
 
+/**
+ * @brief Convert DELETE statement to string
+ */
 std::string DeleteStatement::to_string() const {
     std::string result = "DELETE FROM " + table_->to_string();
     
@@ -113,6 +130,9 @@ std::string DeleteStatement::to_string() const {
     return result;
 }
 
+/**
+ * @brief Convert CREATE TABLE statement to string
+ */
 std::string CreateTableStatement::to_string() const {
     std::string result = "CREATE TABLE " + table_name_ + " (";
     

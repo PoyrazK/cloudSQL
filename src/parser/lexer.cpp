@@ -1,9 +1,19 @@
+/**
+ * @file lexer.cpp
+ * @brief SQL Lexer implementation
+ *
+ * @defgroup lexer Lexer Implementation
+ * @{
+ */
+
 #include "parser/lexer.hpp"
 #include <iostream>
+#include <algorithm>
 
 namespace cloudsql {
 namespace parser {
 
+/* Static keyword initialization */
 const std::map<std::string, TokenType> Lexer::keywords_ = Lexer::init_keywords();
 
 std::map<std::string, TokenType> Lexer::init_keywords() {
@@ -70,6 +80,9 @@ std::map<std::string, TokenType> Lexer::init_keywords() {
     };
 }
 
+/**
+ * @brief Construct a lexer
+ */
 Lexer::Lexer(const std::string& input)
     : input_(input), position_(0), line_(1), column_(1) {
     if (!input_.empty()) {
@@ -79,10 +92,12 @@ Lexer::Lexer(const std::string& input)
     }
 }
 
+/**
+ * @brief Advance to the next character
+ */
 void Lexer::advance() {
     if (position_ < input_.size()) {
-        if (current_char_ == '
-') {
+        if (current_char_ == '\n') {
             line_++;
             column_ = 1;
         } else {
@@ -97,15 +112,16 @@ void Lexer::advance() {
     }
 }
 
+/**
+ * @brief Skip whitespace characters and comments
+ */
 void Lexer::skip_whitespace() {
     while (!is_at_end()) {
-        if (current_char_ == ' ' || current_char_ == '	' || 
-            current_char_ == '
-' || current_char_ == '
-') {
+        if (current_char_ == ' ' || current_char_ == '\t' || 
+            current_char_ == '\n' || current_char_ == '\r') {
             advance();
         } else if (current_char_ == '-') {
-            // Check for comment
+            // Check for single-line comment (--)
             if (position_ + 1 < input_.size() && input_[position_ + 1] == '-') {
                 skip_comment();
             } else {
@@ -117,9 +133,11 @@ void Lexer::skip_whitespace() {
     }
 }
 
+/**
+ * @brief Skip a single-line comment
+ */
 void Lexer::skip_comment() {
-    while (!is_at_end() && current_char_ != '
-') {
+    while (!is_at_end() && current_char_ != '\n') {
         advance();
     }
 }
@@ -152,6 +170,9 @@ Token Lexer::make_error(const std::string& message) {
     return error;
 }
 
+/**
+ * @brief Read a number literal
+ */
 Token Lexer::read_number() {
     uint32_t start_line = line_;
     uint32_t start_col = column_;
@@ -197,6 +218,9 @@ Token Lexer::read_number() {
     return tok;
 }
 
+/**
+ * @brief Read a string literal
+ */
 Token Lexer::read_string() {
     uint32_t start_line = line_;
     uint32_t start_col = column_;
@@ -206,17 +230,15 @@ Token Lexer::read_string() {
     
     std::string value;
     while (!is_at_end() && current_char_ != quote_char) {
-        if (current_char_ == '' && position_ + 1 < input_.size()) {
+        if (current_char_ == '\\' && position_ + 1 < input_.size()) {
             advance();
             switch (current_char_) {
-                case 'n': value += '
-'; break;
-                case 't': value += '	'; break;
-                case 'r': value += '
-'; break;
-                case ''': value += '''; break;
+                case 'n': value += '\n'; break;
+                case 't': value += '\t'; break;
+                case 'r': value += '\r'; break;
+                case '\'': value += '\''; break;
                 case '"': value += '"'; break;
-                case '': value += ''; break;
+                case '\\': value += '\\'; break;
                 default: value += current_char_; break;
             }
         } else {
@@ -235,6 +257,9 @@ Token Lexer::read_string() {
     return tok;
 }
 
+/**
+ * @brief Read an identifier or keyword
+ */
 Token Lexer::read_identifier() {
     uint32_t start_line = line_;
     uint32_t start_col = column_;
@@ -245,8 +270,11 @@ Token Lexer::read_identifier() {
         advance();
     }
     
-    // Check if it's a keyword
-    auto it = keywords_.find(identifier);
+    // Check if it's a keyword (case-insensitive lookup usually but our map is uppercase)
+    std::string lookup = identifier;
+    std::transform(lookup.begin(), lookup.end(), lookup.begin(), ::toupper);
+    
+    auto it = keywords_.find(lookup);
     if (it != keywords_.end()) {
         Token tok(it->second, identifier);
         tok.set_position(start_line, start_col);
@@ -259,6 +287,9 @@ Token Lexer::read_identifier() {
     return tok;
 }
 
+/**
+ * @brief Read an operator
+ */
 Token Lexer::read_operator() {
     uint32_t start_line = line_;
     uint32_t start_col = column_;
@@ -330,6 +361,9 @@ Token Lexer::read_operator() {
     return tok;
 }
 
+/**
+ * @brief Get the next token
+ */
 Token Lexer::next_token() {
     skip_whitespace();
     
@@ -345,7 +379,7 @@ Token Lexer::next_token() {
     }
     
     // String
-    if (c == ''' || c == '"') {
+    if (c == '\'' || c == '"') {
         return read_string();
     }
     
@@ -358,6 +392,9 @@ Token Lexer::next_token() {
     return read_operator();
 }
 
+/**
+ * @brief Peek at the next token without consuming it
+ */
 Token Lexer::peek_token() {
     if (is_at_end()) {
         return Token(TokenType::End, "", line_, column_);
@@ -383,3 +420,5 @@ Token Lexer::peek_token() {
 
 }  // namespace parser
 }  // namespace cloudsql
+
+/** @} */ /* lexer */

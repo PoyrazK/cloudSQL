@@ -1,12 +1,26 @@
+/**
+ * @file parser.cpp
+ * @brief SQL Parser implementation
+ *
+ * @defgroup parser SQL Parser
+ * @{
+ */
+
 #include "parser/parser.hpp"
 #include <iostream>
 
 namespace cloudsql {
 namespace parser {
 
+/**
+ * @brief Construct a new Parser
+ */
 Parser::Parser(std::unique_ptr<Lexer> lexer) 
     : lexer_(std::move(lexer)) {}
 
+/**
+ * @brief Parse a single SQL statement
+ */
 std::unique_ptr<Statement> Parser::parse_statement() {
     Token tok = peek_token();
     
@@ -14,7 +28,6 @@ std::unique_ptr<Statement> Parser::parse_statement() {
         case TokenType::Select:
             return parse_select();
         case TokenType::Create:
-            // Need to peek ahead to see if it's CREATE TABLE
             next_token(); // consume CREATE
             if (peek_token().type() == TokenType::Table) {
                 return parse_create_table();
@@ -22,40 +35,43 @@ std::unique_ptr<Statement> Parser::parse_statement() {
             break;
         case TokenType::Insert:
             return parse_insert();
-        // TODO: Other statements
         default:
             break;
     }
     return nullptr;
 }
 
+/**
+ * @brief Parse SELECT statement
+ */
 std::unique_ptr<Statement> Parser::parse_select() {
     auto stmt = std::make_unique<SelectStatement>();
     consume(TokenType::Select);
     
+    /* DISTINCT */
     if (peek_token().type() == TokenType::Distinct) {
         consume(TokenType::Distinct);
         stmt->set_distinct(true);
     }
     
-    // Parse columns
+    /* Columns */
     bool first = true;
     while (first || consume(TokenType::Comma)) {
         first = false;
         stmt->add_column(parse_expression());
     }
     
-    // FROM
+    /* FROM */
     if (consume(TokenType::From)) {
-        stmt->add_from(parse_expression()); // Simplified: treating table as expression (ColumnExpr)
+        stmt->add_from(parse_expression());
     }
     
-    // WHERE
+    /* WHERE */
     if (consume(TokenType::Where)) {
         stmt->set_where(parse_expression());
     }
     
-    // GROUP BY
+    /* GROUP BY */
     if (consume(TokenType::Group) && consume(TokenType::By)) {
         bool g_first = true;
         while (g_first || consume(TokenType::Comma)) {
@@ -64,12 +80,12 @@ std::unique_ptr<Statement> Parser::parse_select() {
         }
     }
     
-    // HAVING
+    /* HAVING */
     if (consume(TokenType::Having)) {
         stmt->set_having(parse_expression());
     }
     
-    // ORDER BY
+    /* ORDER BY */
     if (consume(TokenType::Order) && consume(TokenType::By)) {
         bool o_first = true;
         while (o_first || consume(TokenType::Comma)) {
@@ -78,7 +94,7 @@ std::unique_ptr<Statement> Parser::parse_select() {
         }
     }
     
-    // LIMIT
+    /* LIMIT */
     if (consume(TokenType::Limit)) {
         Token val = next_token();
         if (val.type() == TokenType::Number) {
@@ -86,7 +102,7 @@ std::unique_ptr<Statement> Parser::parse_select() {
         }
     }
     
-    // OFFSET
+    /* OFFSET */
     if (consume(TokenType::Offset)) {
         Token val = next_token();
         if (val.type() == TokenType::Number) {
@@ -97,17 +113,20 @@ std::unique_ptr<Statement> Parser::parse_select() {
     return stmt;
 }
 
+/**
+ * @brief Parse CREATE TABLE statement
+ */
 std::unique_ptr<Statement> Parser::parse_create_table() {
     auto stmt = std::make_unique<CreateTableStatement>();
-    consume(TokenType::Table); // CREATE already consumed
+    consume(TokenType::Table);
     
-    // IF NOT EXISTS (simplified parsing)
+    /* IF NOT EXISTS */
     if (peek_token().type() == TokenType::Not) {
         consume(TokenType::Not);
         consume(TokenType::Exists);
-        // stmt->set_if_not_exists(true); 
     }
     
+    /* Table name */
     Token name = next_token();
     if (name.type() != TokenType::Identifier) {
         return nullptr;
@@ -116,6 +135,7 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
     
     consume(TokenType::LParen);
     
+    /* Columns */
     bool first = true;
     while (first || consume(TokenType::Comma)) {
         first = false;
@@ -125,7 +145,6 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
         if (col_name.type() != TokenType::Identifier) break;
         
         std::string type_str = col_type.lexeme();
-        // Handle VARCHAR(N)
         if (col_type.type() == TokenType::Varchar) {
              if (consume(TokenType::LParen)) {
                  Token len = next_token();
@@ -136,16 +155,14 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
         
         stmt->add_column(col_name.lexeme(), type_str);
         
-        // Constraints
+        /* Constraints */
         while (true) {
             if (peek_token().type() == TokenType::Primary) {
                 consume(TokenType::Primary);
                 consume(TokenType::Key);
-                // stmt->get_last_column().is_primary_key_ = true;
             } else if (peek_token().type() == TokenType::Not) {
                 consume(TokenType::Not);
                 consume(TokenType::Null);
-                // stmt->get_last_column().is_not_null_ = true;
             } else {
                 break;
             }
@@ -158,17 +175,23 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
     return stmt;
 }
 
+/**
+ * @brief Parse INSERT statement
+ */
 std::unique_ptr<Statement> Parser::parse_insert() {
-    // TODO: Implement
     return nullptr;
 }
 
-// Expression Parsing (Precedence Climbing)
-
+/**
+ * @brief Parse expression (Precedence Climbing)
+ */
 std::unique_ptr<Expression> Parser::parse_expression() {
     return parse_or();
 }
 
+/**
+ * @brief Parse OR expressions
+ */
 std::unique_ptr<Expression> Parser::parse_or() {
     auto left = parse_and();
     while (consume(TokenType::Or)) {
@@ -178,6 +201,9 @@ std::unique_ptr<Expression> Parser::parse_or() {
     return left;
 }
 
+/**
+ * @brief Parse AND expressions
+ */
 std::unique_ptr<Expression> Parser::parse_and() {
     auto left = parse_not();
     while (consume(TokenType::And)) {
@@ -187,6 +213,9 @@ std::unique_ptr<Expression> Parser::parse_and() {
     return left;
 }
 
+/**
+ * @brief Parse NOT expressions
+ */
 std::unique_ptr<Expression> Parser::parse_not() {
     if (consume(TokenType::Not)) {
         return std::make_unique<UnaryExpr>(TokenType::Not, parse_not());
@@ -194,6 +223,9 @@ std::unique_ptr<Expression> Parser::parse_not() {
     return parse_compare();
 }
 
+/**
+ * @brief Parse comparison expressions
+ */
 std::unique_ptr<Expression> Parser::parse_compare() {
     auto left = parse_add_sub();
     
@@ -209,6 +241,9 @@ std::unique_ptr<Expression> Parser::parse_compare() {
     return left;
 }
 
+/**
+ * @brief Parse additive expressions
+ */
 std::unique_ptr<Expression> Parser::parse_add_sub() {
     auto left = parse_mul_div();
     while (peek_token().type() == TokenType::Plus || peek_token().type() == TokenType::Minus) {
@@ -219,6 +254,9 @@ std::unique_ptr<Expression> Parser::parse_add_sub() {
     return left;
 }
 
+/**
+ * @brief Parse multiplicative expressions
+ */
 std::unique_ptr<Expression> Parser::parse_mul_div() {
     auto left = parse_unary();
     while (peek_token().type() == TokenType::Star || peek_token().type() == TokenType::Slash) {
@@ -229,6 +267,9 @@ std::unique_ptr<Expression> Parser::parse_mul_div() {
     return left;
 }
 
+/**
+ * @brief Parse unary expressions
+ */
 std::unique_ptr<Expression> Parser::parse_unary() {
     if (peek_token().type() == TokenType::Minus || peek_token().type() == TokenType::Plus) {
         Token op = next_token();
@@ -237,9 +278,13 @@ std::unique_ptr<Expression> Parser::parse_unary() {
     return parse_primary();
 }
 
+/**
+ * @brief Parse primary expressions (literals, identifiers, subqueries)
+ */
 std::unique_ptr<Expression> Parser::parse_primary() {
     Token tok = peek_token();
     
+    /* Numbers */
     if (tok.type() == TokenType::Number) {
         next_token();
         if (tok.lexeme().find('.') != std::string::npos) {
@@ -247,13 +292,19 @@ std::unique_ptr<Expression> Parser::parse_primary() {
         } else {
             return std::make_unique<ConstantExpr>(common::Value::make_int64(tok.as_int64()));
         }
-    } else if (tok.type() == TokenType::String) {
+    } 
+    /* Strings */
+    else if (tok.type() == TokenType::String) {
         next_token();
         return std::make_unique<ConstantExpr>(common::Value::make_text(tok.as_string()));
-    } else if (tok.type() == TokenType::Identifier) {
+    } 
+    /* Identifiers (Columns) */
+    else if (tok.type() == TokenType::Identifier) {
         next_token();
         return std::make_unique<ColumnExpr>(tok.lexeme());
-    } else if (consume(TokenType::LParen)) {
+    } 
+    /* Parenthesized Expressions */
+    else if (consume(TokenType::LParen)) {
         auto expr = parse_expression();
         consume(TokenType::RParen);
         return expr;
@@ -262,8 +313,9 @@ std::unique_ptr<Expression> Parser::parse_primary() {
     return nullptr;
 }
 
-// Helpers
-
+/**
+ * @brief Get next token from lexer
+ */
 Token Parser::next_token() {
     if (has_current_) {
         has_current_ = false;
@@ -272,6 +324,9 @@ Token Parser::next_token() {
     return lexer_->next_token();
 }
 
+/**
+ * @brief Peek at current token without consuming it
+ */
 Token Parser::peek_token() {
     if (!has_current_) {
         current_token_ = lexer_->next_token();
@@ -280,6 +335,9 @@ Token Parser::peek_token() {
     return current_token_;
 }
 
+/**
+ * @brief Consume token if it matches expected type
+ */
 bool Parser::consume(TokenType type) {
     if (peek_token().type() == type) {
         next_token();
@@ -290,3 +348,5 @@ bool Parser::consume(TokenType type) {
 
 } // namespace parser
 } // namespace cloudsql
+
+/** @} */ /* parser */

@@ -1,8 +1,16 @@
+/**
+ * @file expression.cpp
+ * @brief Expression evaluator implementation
+ */
+
 #include "parser/expression.hpp"
 
 namespace cloudsql {
 namespace parser {
 
+/**
+ * @brief Evaluate binary expression
+ */
 common::Value BinaryExpr::evaluate() const {
     common::Value left_val = left_->evaluate();
     common::Value right_val = right_->evaluate();
@@ -61,6 +69,9 @@ std::unique_ptr<Expression> BinaryExpr::clone() const {
     return std::make_unique<BinaryExpr>(left_->clone(), op_, right_->clone());
 }
 
+/**
+ * @brief Evaluate unary expression
+ */
 common::Value UnaryExpr::evaluate() const {
     common::Value val = expr_->evaluate();
     switch (op_) {
@@ -84,6 +95,9 @@ std::unique_ptr<Expression> UnaryExpr::clone() const {
     return std::make_unique<UnaryExpr>(op_, expr_->clone());
 }
 
+/**
+ * @brief Evaluate column expression (placeholder)
+ */
 common::Value ColumnExpr::evaluate() const {
     return common::Value::make_null();
 }
@@ -109,6 +123,9 @@ std::unique_ptr<Expression> ConstantExpr::clone() const {
     return std::make_unique<ConstantExpr>(value_);
 }
 
+/**
+ * @brief Evaluate function expression (placeholder)
+ */
 common::Value FunctionExpr::evaluate() const {
     return common::Value::make_null();
 }
@@ -133,6 +150,9 @@ std::unique_ptr<Expression> FunctionExpr::clone() const {
     return result;
 }
 
+/**
+ * @brief Evaluate IN expression
+ */
 common::Value InExpr::evaluate() const {
     common::Value col_val = column_->evaluate();
     for (const auto& val : values_) {
@@ -163,6 +183,9 @@ std::unique_ptr<Expression> InExpr::clone() const {
     return std::make_unique<InExpr>(column_->clone(), std::move(cloned_vals), not_flag_);
 }
 
+/**
+ * @brief Evaluate IS NULL expression
+ */
 common::Value IsNullExpr::evaluate() const {
     common::Value val = expr_->evaluate();
     bool result = val.is_null();
