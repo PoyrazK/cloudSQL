@@ -190,7 +190,6 @@ TEST(StorageTest_MultiPage) {
     table.create();
 
     /* Insert many large rows to trigger multiple pages */
-    /* Each row is roughly 100 bytes. 4KB pages = ~40 rows per page. */
     std::string large_str(100, 'x');
     for (int i = 0; i < 100; ++i) {
         table.insert(Tuple({Value::make_text(std::to_string(i) + large_str)}));
@@ -203,6 +202,24 @@ TEST(StorageTest_MultiPage) {
         count++;
     }
     EXPECT_EQ(count, 100);
+}
+
+// ============= Index Tests =============
+
+TEST(IndexTest_BTreeBasic) {
+    std::remove("./test_data/idx_test.idx");
+    StorageManager sm("./test_data");
+    BTreeIndex idx("idx_test", sm, TYPE_INT64);
+    idx.create();
+
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(1, 1));
+    idx.insert(Value::make_int64(20), HeapTable::TupleId(1, 2));
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(2, 1));
+
+    auto res = idx.search(Value::make_int64(10));
+    EXPECT_EQ(res.size(), static_cast<size_t>(2));
+
+    idx.drop();
 }
 
 // ============= Execution Tests =============
@@ -246,6 +263,52 @@ TEST(ExecutionTest_EndToEnd) {
     }
 }
 
+TEST(ExecutionTest_HashJoin) {
+    std::remove("./test_data/orders.heap");
+    std::remove("./test_data/users_join.heap");
+    StorageManager sm("./test_data");
+    
+    Schema users_schema;
+    users_schema.add_column("user_id", TYPE_INT64);
+    users_schema.add_column("name", TYPE_TEXT);
+    
+    Schema orders_schema;
+    orders_schema.add_column("order_id", TYPE_INT64);
+    orders_schema.add_column("user_id", TYPE_INT64);
+
+    auto users_table = std::make_unique<HeapTable>("users_join", sm, users_schema);
+    users_table->create();
+    users_table->insert(Tuple({Value::make_int64(1), Value::make_text("Alice")}));
+    users_table->insert(Tuple({Value::make_int64(2), Value::make_text("Bob")}));
+
+    auto orders_table = std::make_unique<HeapTable>("orders", sm, orders_schema);
+    orders_table->create();
+    orders_table->insert(Tuple({Value::make_int64(101), Value::make_int64(1)}));
+    orders_table->insert(Tuple({Value::make_int64(102), Value::make_int64(1)}));
+    orders_table->insert(Tuple({Value::make_int64(103), Value::make_int64(2)}));
+
+    /* Join: orders.user_id = users.user_id */
+    auto left = std::make_unique<SeqScanOperator>(std::move(orders_table));
+    auto right = std::make_unique<SeqScanOperator>(std::move(users_table));
+    
+    auto join = std::make_unique<HashJoinOperator>(
+        std::move(left),
+        std::move(right),
+        std::make_unique<ColumnExpr>("user_id"), 
+        std::make_unique<ColumnExpr>("user_id")
+    );
+
+    join->open();
+    Tuple t;
+    int count = 0;
+    while (join->next(t)) {
+        count++;
+        /* Result Schema: [order_id, user_id, user_id, name] */
+        EXPECT_EQ(t.size(), static_cast<size_t>(4));
+    }
+    EXPECT_EQ(count, 3);
+}
+
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
@@ -261,13 +324,15 @@ int main() {
     RUN_TEST(ParserTest_CreateTableComplex);
     std::cout << std::endl;
 
-    std::cout << "Storage Tests:" << std::endl;
+    std::cout << "Storage & Index Tests:" << std::endl;
     RUN_TEST(StorageTest_Persistence);
     RUN_TEST(StorageTest_MultiPage);
+    RUN_TEST(IndexTest_BTreeBasic);
     std::cout << std::endl;
 
     std::cout << "Execution Tests:" << std::endl;
     RUN_TEST(ExecutionTest_EndToEnd);
+    RUN_TEST(ExecutionTest_HashJoin);
     std::cout << std::endl;
     
     std::cout << "========================" << std::endl;
