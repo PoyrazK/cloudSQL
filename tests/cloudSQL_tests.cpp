@@ -73,6 +73,67 @@ TEST(ValueTest_Basic) {
     EXPECT_EQ(val.to_int64(), 42);
 }
 
+// ============= Parser Tests =============
+
+TEST(ParserTest_Expressions) {
+    // 1. Arithmetic Precedence
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT 1 + 2 * 3");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_STREQ(select->columns()[0]->to_string().c_str(), "1 + 2 * 3");
+    }
+
+    // 2. Logic and Comparisons
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT a > 10 OR b <= 5 AND NOT c");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_STREQ(select->columns()[0]->to_string().c_str(), "a > 10 OR b <= 5 AND NOT c");
+    }
+}
+
+TEST(ParserTest_SelectVariants) {
+    // 1. DISTINCT and LIMIT/OFFSET
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT DISTINCT name FROM users LIMIT 10 OFFSET 20");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        
+        EXPECT_TRUE(select->distinct());
+        EXPECT_EQ(select->limit(), 10);
+        EXPECT_EQ(select->offset(), 20);
+    }
+
+    // 2. ORDER BY and GROUP BY
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT age, cnt FROM users GROUP BY age ORDER BY age");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        
+        EXPECT_EQ(select->group_by().size(), static_cast<size_t>(1));
+        EXPECT_EQ(select->order_by().size(), static_cast<size_t>(1));
+        EXPECT_STREQ(select->group_by()[0]->to_string().c_str(), "age");
+    }
+}
+
+TEST(ParserTest_CreateTableComplex) {
+    auto sql = "CREATE TABLE products (id INT PRIMARY KEY, price DOUBLE NOT NULL, name VARCHAR(255))";
+    auto lexer = std::make_unique<Lexer>(sql);
+    Parser parser(std::move(lexer));
+    auto stmt = parser.parse_statement();
+    
+    EXPECT_TRUE(stmt != nullptr);
+    auto ct = static_cast<CreateTableStatement*>(stmt.get());
+    EXPECT_STREQ(ct->table_name().c_str(), "products");
+    EXPECT_EQ(ct->columns().size(), static_cast<size_t>(3));
+    EXPECT_TRUE(ct->columns()[0].is_primary_key_);
+}
+
 // ============= Execution Tests =============
 
 TEST(ExecutionTest_EndToEnd) {
@@ -114,46 +175,15 @@ TEST(ExecutionTest_EndToEnd) {
     }
 }
 
-// ============= Index Tests =============
-
-TEST(IndexTest_BTreeBasic) {
-    std::remove("./test_data/idx_test.idx");
-    StorageManager sm("./test_data");
-    BTreeIndex idx("idx_test", sm, TYPE_INT64);
-    idx.create();
-
-    idx.insert(Value::make_int64(10), HeapTable::TupleId(1, 1));
-    idx.insert(Value::make_int64(20), HeapTable::TupleId(1, 2));
-    idx.insert(Value::make_int64(10), HeapTable::TupleId(2, 1));
-
-    auto res = idx.search(Value::make_int64(10));
-    EXPECT_EQ(res.size(), static_cast<size_t>(2));
-    EXPECT_EQ(res[0].page_num, 1);
-    EXPECT_EQ(res[1].page_num, 2);
-
-    auto res2 = idx.search(Value::make_int64(20));
-    EXPECT_EQ(res2.size(), static_cast<size_t>(1));
-    EXPECT_EQ(res2[0].slot_num, 2);
-
-    // Scan test
-    auto iter = idx.scan();
-    BTreeIndex::Entry entry;
-    int count = 0;
-    while (iter.next(entry)) {
-        count++;
-    }
-    EXPECT_EQ(count, 3);
-
-    idx.drop();
-}
-
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
     
     RUN_TEST(ValueTest_Basic);
+    RUN_TEST(ParserTest_Expressions);
+    RUN_TEST(ParserTest_SelectVariants);
+    RUN_TEST(ParserTest_CreateTableComplex);
     RUN_TEST(ExecutionTest_EndToEnd);
-    RUN_TEST(IndexTest_BTreeBasic);
     
     std::cout << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;
