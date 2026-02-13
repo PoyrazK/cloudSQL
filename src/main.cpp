@@ -20,6 +20,7 @@
 #include "common/config.hpp"
 #include "network/server.hpp"
 #include "catalog/catalog.hpp"
+#include "storage/storage_manager.hpp"
 
 /* Global server instance for signal handling */
 static std::unique_ptr<cloudsql::network::Server> g_server = nullptr;
@@ -102,6 +103,9 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
     
+    /* Initialize storage manager */
+    auto storage_manager = std::make_unique<cloudsql::storage::StorageManager>(config.data_dir);
+
     /* Initialize catalog */
     auto catalog = cloudsql::Catalog::create();
     if (!catalog) {
@@ -110,7 +114,7 @@ int main(int argc, char* argv[]) {
     }
     
     /* Initialize server */
-    g_server = cloudsql::network::Server::create(config.port);
+    g_server = cloudsql::network::Server::create(config.port, *catalog, *storage_manager);
     if (!g_server) {
         std::cerr << "Failed to create server\n";
         return 1;

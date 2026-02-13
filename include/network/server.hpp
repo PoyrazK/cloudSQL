@@ -18,6 +18,10 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
+#include "catalog/catalog.hpp"
+#include "storage/storage_manager.hpp"
+#include "executor/query_executor.hpp"
+
 namespace cloudsql {
 namespace network {
 
@@ -32,15 +36,6 @@ public:
     std::atomic<uint64_t> bytes_received{0};
     std::atomic<uint64_t> bytes_sent{0};
     std::atomic<uint64_t> uptime_seconds{0};
-};
-
-/**
- * @brief Server callbacks using std::function
- */
-struct ServerCallbacks {
-    std::function<int(class Server* server, int client_fd)> on_connect;
-    std::function<int(class Server* server, int client_fd, const std::string& sql)> on_query;
-    std::function<int(class Server* server, int client_fd)> on_disconnect;
 };
 
 /**
@@ -62,8 +57,7 @@ public:
     /**
      * @brief Constructor
      */
-    explicit Server(uint16_t port) 
-        : port_(port), listen_fd_(-1), status_(ServerStatus::Stopped) {}
+    Server(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager);
 
     /**
      * @brief Destructor
@@ -78,14 +72,7 @@ public:
     /**
      * @brief Create a new server instance
      */
-    static std::unique_ptr<Server> create(uint16_t port);
-
-    /**
-     * @brief Set server callbacks
-     */
-    void set_callbacks(const ServerCallbacks& callbacks) {
-        callbacks_ = callbacks;
-    }
+    static std::unique_ptr<Server> create(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager);
 
     /**
      * @brief Start the server
@@ -102,49 +89,25 @@ public:
      */
     void wait();
 
-    /**
-     * @brief Get server statistics
-     */
-    const ServerStats& get_stats() const {
-        return stats_;
-    }
-
-    /**
-     * @brief Get server status
-     */
-    ServerStatus get_status() const {
-        return status_;
-    }
-
-    /**
-     * @brief Get server port
-     */
-    uint16_t get_port() const {
-        return port_;
-    }
-
-    /**
-     * @brief Check if server is running
-     */
-    bool is_running() const {
-        return running_.load();
-    }
-
-    /**
-     * @brief Get status string
-     */
+    const ServerStats& get_stats() const { return stats_; }
+    ServerStatus get_status() const { return status_; }
+    uint16_t get_port() const { return port_; }
+    bool is_running() const { return running_.load(); }
     std::string get_status_string() const;
 
 private:
     void accept_connections();
-
     void handle_connection(int client_fd);
 
     uint16_t port_;
     int listen_fd_;
     std::atomic<bool> running_{false};
     std::atomic<ServerStatus> status_;
-    ServerCallbacks callbacks_;
+    
+    Catalog& catalog_;
+    storage::StorageManager& storage_manager_;
+    executor::QueryExecutor executor_;
+    
     ServerStats stats_;
     std::thread accept_thread_;
 };

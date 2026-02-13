@@ -146,7 +146,6 @@ TEST(StorageTest_Delete) {
     EXPECT_EQ(table.tuple_count(), 2);
     
     /* Remove first tuple */
-    // std::cout << "DEBUG: Attempting remove at " << tid1.to_string() << std::endl;
     EXPECT_TRUE(table.remove(tid1));
     EXPECT_EQ(table.tuple_count(), 1);
 
@@ -161,8 +160,10 @@ TEST(StorageTest_Delete) {
 // ============= Network Tests =============
 
 TEST(NetworkTest_Handshake) {
-    uint16_t port = 5436;
-    auto server = network::Server::create(port);
+    uint16_t port = 5437;
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    auto server = network::Server::create(port, *catalog, sm);
     
     std::thread server_thread([&]() {
         server->start();

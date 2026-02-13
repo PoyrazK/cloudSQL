@@ -7,6 +7,8 @@
  */
 
 #include "network/server.hpp"
+#include "parser/lexer.hpp"
+#include "parser/parser.hpp"
 #include <arpa/inet.h>
 #include <vector>
 
@@ -39,6 +41,12 @@ public:
  */
 class ProtocolWriter {
 public:
+    static void append_int16(std::vector<char>& buf, uint16_t val) {
+        uint16_t nval = htons(val);
+        const char* p = reinterpret_cast<const char*>(&nval);
+        buf.insert(buf.end(), p, p + 2);
+    }
+
     static void append_int32(std::vector<char>& buf, uint32_t val) {
         uint32_t nval = htonl(val);
         const char* p = reinterpret_cast<const char*>(&nval);
@@ -49,27 +57,29 @@ public:
         buf.insert(buf.end(), s.begin(), s.end());
         buf.push_back('\0');
     }
+
+    static void finish_message(std::vector<char>& buf) {
+        uint32_t len = htonl(static_cast<uint32_t>(buf.size() - 1));
+        std::memcpy(&buf[1], &len, 4);
+    }
 };
 
-/**
- * @brief Create a new server instance
- */
-std::unique_ptr<Server> Server::create(uint16_t port) {
-    return std::make_unique<Server>(port);
+Server::Server(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager)
+    : port_(port), listen_fd_(-1), status_(ServerStatus::Stopped)
+    , catalog_(catalog), storage_manager_(storage_manager), executor_(catalog, storage_manager) {}
+
+std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager) {
+    return std::make_unique<Server>(port, catalog, storage_manager);
 }
 
 /**
  * @brief Start the server
  */
 bool Server::start() {
-    if (running_.load()) {
-        return false;
-    }
+    if (running_.load()) return false;
 
     listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd_ < 0) {
-        return false;
-    }
+    if (listen_fd_ < 0) return false;
 
     int opt = 1;
     setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -100,14 +110,11 @@ bool Server::start() {
  * @brief Stop the server
  */
 bool Server::stop() {
-    if (!running_.load()) {
-        return true;
-    }
+    if (!running_.load()) return true;
 
     status_ = ServerStatus::Stopping;
     running_ = false;
 
-    /* Signal shutdown */
     shutdown(listen_fd_, SHUT_RDWR);
     close(listen_fd_);
     listen_fd_ = -1;
@@ -137,9 +144,6 @@ std::string Server::get_status_string() const {
     }
 }
 
-/**
- * @brief Accept incoming connections
- */
 void Server::accept_connections() {
     while (running_.load()) {
         struct sockaddr_in client_addr;
@@ -154,7 +158,6 @@ void Server::accept_connections() {
         stats_.connections_accepted.fetch_add(1);
         stats_.connections_active.fetch_add(1);
 
-        /* Handle connection in a new thread */
         std::thread([this, client_fd]() {
             handle_connection(client_fd);
             stats_.connections_active.fetch_sub(1);
@@ -181,13 +184,11 @@ void Server::handle_connection(int client_fd) {
 
     uint32_t protocol = ProtocolReader::read_int32(buffer + 4);
     
-    /* Check for SSL Request (80877103) */
+    /* Check for SSL Request */
     if (protocol == 80877103) {
-        /* We don't support SSL, send 'N' */
         char ssl_deny = 'N';
         send(client_fd, &ssl_deny, 1, 0);
         
-        /* Read actual StartupMessage */
         n = recv(client_fd, buffer, 4, 0);
         if (n < 4) { close(client_fd); return; }
         len = ProtocolReader::read_int32(buffer);
@@ -196,22 +197,14 @@ void Server::handle_connection(int client_fd) {
         protocol = ProtocolReader::read_int32(buffer + 4);
     }
 
-    /* Verify Protocol Version (3.0 is 196608) */
-    if (protocol != 196608) {
-        close(client_fd);
-        return;
-    }
+    if (protocol != 196608) { close(client_fd); return; }
 
-    /* 3. Send AuthenticationOK ('R') */
-    std::vector<char> auth_ok = {'R'};
-    ProtocolWriter::append_int32(auth_ok, 8); // Length
-    ProtocolWriter::append_int32(auth_ok, 0); // Success
+    /* Send AuthenticationOK ('R') */
+    std::vector<char> auth_ok = {'R', 0, 0, 0, 8, 0, 0, 0, 0};
     send(client_fd, auth_ok.data(), auth_ok.size(), 0);
 
-    /* 4. Send ReadyForQuery ('Z') */
-    std::vector<char> ready = {'Z'};
-    ProtocolWriter::append_int32(ready, 5);
-    ready.push_back('I'); // Idle
+    /* Send ReadyForQuery ('Z') */
+    std::vector<char> ready = {'Z', 0, 0, 0, 5, 'I'};
     send(client_fd, ready.data(), ready.size(), 0);
 
     /* 5. Main Message Loop */
@@ -234,15 +227,62 @@ void Server::handle_connection(int client_fd) {
             std::string sql(body.data());
             stats_.queries_executed.fetch_add(1);
             
-            /* TODO: Invoke QueryExecutor and send RowDescription/DataRow/CommandComplete */
-            
-            /* For now, send empty response or Error */
-            std::vector<char> complete = {'C'};
-            std::string msg = "SELECT 0";
-            ProtocolWriter::append_int32(complete, 4 + msg.size() + 1);
-            ProtocolWriter::append_string(complete, msg);
-            send(client_fd, complete.data(), complete.size(), 0);
-        } else if (type == 'X') { /* Terminate */
+            try {
+                auto lexer = std::make_unique<parser::Lexer>(sql);
+                parser::Parser parser(std::move(lexer));
+                auto stmt = parser.parse_statement();
+                
+                if (stmt) {
+                    auto result = executor_.execute(*stmt);
+                    
+                    if (result.success()) {
+                        /* 1. Send RowDescription ('T') for SELECT */
+                        if (stmt->type() == parser::StmtType::Select) {
+                            std::vector<char> desc = {'T'};
+                            ProtocolWriter::append_int32(desc, 0); // Length placeholder
+                            ProtocolWriter::append_int16(desc, result.schema().column_count());
+                            
+                            for (const auto& col : result.schema().columns()) {
+                                ProtocolWriter::append_string(desc, col.name());
+                                ProtocolWriter::append_int32(desc, 0); // Table OID
+                                ProtocolWriter::append_int16(desc, 0); // Attr index
+                                ProtocolWriter::append_int32(desc, 25); // Type OID (TEXT=25)
+                                ProtocolWriter::append_int16(desc, -1); // Type size
+                                ProtocolWriter::append_int32(desc, -1); // Type modifier
+                                ProtocolWriter::append_int16(desc, 0); // Format (Text)
+                            }
+                            ProtocolWriter::finish_message(desc);
+                            send(client_fd, desc.data(), desc.size(), 0);
+
+                            /* 2. Send DataRows ('D') */
+                            for (const auto& row : result.rows()) {
+                                std::vector<char> data = {'D'};
+                                ProtocolWriter::append_int32(data, 0); // Length
+                                ProtocolWriter::append_int16(data, row.size());
+                                
+                                for (const auto& val : row.values()) {
+                                    std::string s = val.to_string();
+                                    ProtocolWriter::append_int32(data, s.size());
+                                    data.insert(data.end(), s.begin(), s.end());
+                                }
+                                ProtocolWriter::finish_message(data);
+                                send(client_fd, data.data(), data.size(), 0);
+                            }
+                        }
+
+                        /* 3. Send CommandComplete ('C') */
+                        std::vector<char> complete = {'C'};
+                        std::string msg = (stmt->type() == parser::StmtType::Select) ? 
+                                          "SELECT " + std::to_string(result.row_count()) : "OK";
+                        ProtocolWriter::append_int32(complete, 4 + msg.size() + 1);
+                        ProtocolWriter::append_string(complete, msg);
+                        send(client_fd, complete.data(), complete.size(), 0);
+                    } else {
+                        /* TODO: Send ErrorResponse ('E') */
+                    }
+                }
+            } catch (...) { /* Handle parsing/exec errors */ }
+        } else if (type == 'X') {
             break;
         }
 
