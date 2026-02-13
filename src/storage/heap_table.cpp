@@ -137,15 +137,31 @@ bool HeapTable::get(const TupleId& tuple_id, executor::Tuple& out_tuple) const {
     uint16_t offset = slots[tuple_id.slot_num];
     if (offset == 0) return false;
 
-    /* Deserialize (simple pipe-separated) */
+    /* Deserialize using schema information */
     const char* data = buffer + offset;
     std::string s(data);
     std::stringstream ss(s);
     std::string item;
     std::vector<common::Value> values;
     
-    while (std::getline(ss, item, '|')) {
-        values.push_back(common::Value::make_text(item));
+    for (size_t i = 0; i < schema_.column_count(); ++i) {
+        if (!std::getline(ss, item, '|')) break;
+        
+        const auto& col = schema_.get_column(i);
+        switch (col.type()) {
+            case common::TYPE_INT64:
+                values.push_back(common::Value::make_int64(std::stoll(item)));
+                break;
+            case common::TYPE_FLOAT64:
+                values.push_back(common::Value::make_float64(std::stod(item)));
+                break;
+            case common::TYPE_BOOL:
+                values.push_back(common::Value::make_bool(item == "TRUE" || item == "1"));
+                break;
+            default:
+                values.push_back(common::Value::make_text(item));
+                break;
+        }
     }
     
     out_tuple = executor::Tuple(std::move(values));

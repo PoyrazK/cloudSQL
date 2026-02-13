@@ -13,6 +13,13 @@
 #include "parser/token.hpp"
 
 namespace cloudsql {
+
+/* Forward declarations */
+namespace executor {
+    class Tuple;
+    class Schema;
+}
+
 namespace parser {
 
 class Expression;
@@ -30,11 +37,20 @@ enum class ExprType {
     IsNull
 };
 
+/**
+ * @brief Base class for all SQL expressions
+ */
 class Expression {
 public:
     virtual ~Expression() = default;
     virtual ExprType type() const = 0;
-    virtual common::Value evaluate() const = 0;
+    
+    /**
+     * @brief Evaluate expression against an optional tuple context
+     */
+    virtual common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                                   const executor::Schema* schema = nullptr) const = 0;
+                                   
     virtual std::string to_string() const = 0;
     virtual std::unique_ptr<Expression> clone() const = 0;
 };
@@ -54,7 +70,8 @@ public:
     const Expression& right() const { return *right_; }
     TokenType op() const { return op_; }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -72,7 +89,8 @@ public:
     TokenType op() const { return op_; }
     const Expression& expr() const { return *expr_; }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -94,7 +112,8 @@ public:
     const std::string& table() const { return table_name_; }
     bool has_table() const { return !table_name_.empty(); }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -109,7 +128,11 @@ public:
     ExprType type() const override { return ExprType::Constant; }
     const common::Value& value() const { return value_; }
     
-    common::Value evaluate() const override { return value_; }
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override { 
+        (void)tuple; (void)schema;
+        return value_; 
+    }
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -128,7 +151,8 @@ public:
     void add_arg(std::unique_ptr<Expression> arg) { args_.push_back(std::move(arg)); }
     const auto& args() const { return args_; }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -148,7 +172,8 @@ public:
     const auto& values() const { return values_; }
     bool is_not() const { return not_flag_; }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
@@ -166,7 +191,8 @@ public:
     const Expression& expr() const { return *expr_; }
     bool is_not() const { return not_flag_; }
     
-    common::Value evaluate() const override;
+    common::Value evaluate(const executor::Tuple* tuple = nullptr, 
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
