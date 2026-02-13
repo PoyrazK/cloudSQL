@@ -73,6 +73,25 @@ TEST(ValueTest_Basic) {
     EXPECT_EQ(val.to_int64(), 42);
 }
 
+TEST(ValueTest_TypeVariety) {
+    /* 1. Boolean */
+    Value b(true);
+    EXPECT_TRUE(b.as_bool());
+    EXPECT_STREQ(b.to_string().c_str(), "TRUE");
+
+    /* 2. Float/Double */
+    Value f(3.14159);
+    EXPECT_TRUE(f.as_float64() > 3.14 && f.as_float64() < 3.15);
+
+    /* 3. Text/String */
+    Value s("cloudSQL");
+    EXPECT_STREQ(s.as_text().c_str(), "cloudSQL");
+
+    /* 4. Numeric conversion */
+    Value i(100);
+    EXPECT_TRUE(i.to_float64() == 100.0);
+}
+
 // ============= Parser Tests =============
 
 TEST(ParserTest_Expressions) {
@@ -134,6 +153,58 @@ TEST(ParserTest_CreateTableComplex) {
     EXPECT_TRUE(ct->columns()[0].is_primary_key_);
 }
 
+// ============= Storage Tests =============
+
+TEST(StorageTest_Persistence) {
+    std::string filename = "persist_test";
+    std::string path = "./test_data/" + filename + ".heap";
+    std::remove(path.c_str());
+
+    Schema schema;
+    schema.add_column("data", TYPE_TEXT);
+
+    {
+        StorageManager sm("./test_data");
+        HeapTable table(filename, sm, schema);
+        table.create();
+        table.insert(Tuple({Value::make_text("Persistent data")}));
+    } /* Scope ends, sm and table destroyed */
+
+    {
+        StorageManager sm("./test_data");
+        HeapTable table(filename, sm, schema);
+        auto iter = table.scan();
+        Tuple t;
+        EXPECT_TRUE(iter.next(t));
+        EXPECT_STREQ(t.get(0).as_text().c_str(), "Persistent data");
+    }
+}
+
+TEST(StorageTest_MultiPage) {
+    std::remove("./test_data/large_table.heap");
+    StorageManager sm("./test_data");
+    Schema schema;
+    schema.add_column("val", TYPE_TEXT);
+
+    HeapTable table("large_table", sm, schema);
+    table.create();
+
+    /* Insert many large rows to trigger multiple pages */
+    /* Each row is roughly 100 bytes. 4KB pages = ~40 rows per page. */
+    std::string large_str(100, 'x');
+    for (int i = 0; i < 100; ++i) {
+        table.insert(Tuple({Value::make_text(std::to_string(i) + large_str)}));
+    }
+
+    auto iter = table.scan();
+    Tuple t;
+    int count = 0;
+    while (iter.next(t)) {
+        count++;
+    }
+    EXPECT_EQ(count, 100);
+}
+
 // ============= Execution Tests =============
 
 TEST(ExecutionTest_EndToEnd) {
@@ -179,11 +250,25 @@ int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
     
+    std::cout << "Value Tests:" << std::endl;
     RUN_TEST(ValueTest_Basic);
+    RUN_TEST(ValueTest_TypeVariety);
+    std::cout << std::endl;
+    
+    std::cout << "Parser Tests:" << std::endl;
     RUN_TEST(ParserTest_Expressions);
     RUN_TEST(ParserTest_SelectVariants);
     RUN_TEST(ParserTest_CreateTableComplex);
+    std::cout << std::endl;
+
+    std::cout << "Storage Tests:" << std::endl;
+    RUN_TEST(StorageTest_Persistence);
+    RUN_TEST(StorageTest_MultiPage);
+    std::cout << std::endl;
+
+    std::cout << "Execution Tests:" << std::endl;
     RUN_TEST(ExecutionTest_EndToEnd);
+    std::cout << std::endl;
     
     std::cout << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;
