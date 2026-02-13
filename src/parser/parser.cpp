@@ -24,21 +24,27 @@ Parser::Parser(std::unique_ptr<Lexer> lexer)
 std::unique_ptr<Statement> Parser::parse_statement() {
     Token tok = peek_token();
     
+    std::unique_ptr<Statement> stmt = nullptr;
     switch (tok.type()) {
         case TokenType::Select:
-            return parse_select();
+            stmt = parse_select();
+            break;
         case TokenType::Create:
             next_token(); // consume CREATE
             if (peek_token().type() == TokenType::Table) {
-                return parse_create_table();
+                stmt = parse_create_table();
             }
             break;
         case TokenType::Insert:
-            return parse_insert();
+            stmt = parse_insert();
+            break;
         default:
             break;
     }
-    return nullptr;
+
+    /* If we didn't consume the whole input or have trailing garbage, it might be an error */
+    /* For this simple parser, we'll just check if stmt is valid */
+    return stmt;
 }
 
 /**
@@ -60,21 +66,26 @@ std::unique_ptr<Statement> Parser::parse_select() {
         first = false;
         
         auto expr = parse_expression();
-        if (!expr) break;
+        if (!expr) return nullptr; /* Failure */
         stmt->add_column(std::move(expr));
         
-        /* Look ahead: if next is FROM, we're done with columns */
         if (peek_token().type() == TokenType::From) break;
     }
     
     /* FROM */
     if (consume(TokenType::From)) {
-        stmt->add_from(parse_expression());
+        auto from_expr = parse_expression();
+        if (!from_expr) return nullptr;
+        stmt->add_from(std::move(from_expr));
+    } else {
+        return nullptr; /* SELECT must have FROM in our implementation */
     }
     
     /* WHERE */
     if (consume(TokenType::Where)) {
-        stmt->set_where(parse_expression());
+        auto where_expr = parse_expression();
+        if (!where_expr) return nullptr;
+        stmt->set_where(std::move(where_expr));
     }
     
     /* GROUP BY */
@@ -87,18 +98,22 @@ std::unique_ptr<Statement> Parser::parse_select() {
                 g_first = false;
                 
                 auto expr = parse_expression();
-                if (!expr) break;
+                if (!expr) return nullptr;
                 stmt->add_group_by(std::move(expr));
                 
                 if (peek_token().type() != TokenType::Comma) break;
             }
+        } else {
+            return nullptr;
         }
     }
     
     /* HAVING */
     if (peek_token().type() == TokenType::Having) {
         consume(TokenType::Having);
-        stmt->set_having(parse_expression());
+        auto having_expr = parse_expression();
+        if (!having_expr) return nullptr;
+        stmt->set_having(std::move(having_expr));
     }
     
     /* ORDER BY */
@@ -111,34 +126,37 @@ std::unique_ptr<Statement> Parser::parse_select() {
                 o_first = false;
                 
                 auto expr = parse_expression();
-                if (!expr) break;
+                if (!expr) return nullptr;
                 stmt->add_order_by(std::move(expr));
                 
-                /* Optional ASC/DESC */
                 if (peek_token().type() == TokenType::Asc || peek_token().type() == TokenType::Desc) {
                     next_token();
                 }
                 
                 if (peek_token().type() != TokenType::Comma) break;
             }
+        } else {
+            return nullptr;
         }
     }
     
     /* LIMIT */
-    if (peek_token().type() == TokenType::Limit) {
-        consume(TokenType::Limit);
+    if (consume(TokenType::Limit)) {
         Token val = next_token();
         if (val.type() == TokenType::Number) {
             stmt->set_limit(val.as_int64());
+        } else {
+            return nullptr;
         }
     }
     
     /* OFFSET */
-    if (peek_token().type() == TokenType::Offset) {
-        consume(TokenType::Offset);
+    if (consume(TokenType::Offset)) {
         Token val = next_token();
         if (val.type() == TokenType::Number) {
             stmt->set_offset(val.as_int64());
+        } else {
+            return nullptr;
         }
     }
     
@@ -154,10 +172,9 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
     
     /* IF NOT EXISTS */
     if (consume(TokenType::Not)) {
-        consume(TokenType::Exists);
+        if (!consume(TokenType::Exists)) return nullptr;
     }
     
-    /* Table name */
     Token name = next_token();
     if (name.type() != TokenType::Identifier) {
         return nullptr;
@@ -166,14 +183,13 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
     
     if (!consume(TokenType::LParen)) return nullptr;
     
-    /* Columns */
     bool first = true;
     while (true) {
         if (!first && !consume(TokenType::Comma)) break;
         first = false;
         
         Token col_name = next_token();
-        if (col_name.type() != TokenType::Identifier) break;
+        if (col_name.type() != TokenType::Identifier) return nullptr;
         
         Token col_type = next_token();
         std::string type_str = col_type.lexeme();
@@ -181,6 +197,7 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
         if (col_type.type() == TokenType::Varchar) {
              if (consume(TokenType::LParen)) {
                  Token len = next_token();
+                 if (len.type() != TokenType::Number) return nullptr;
                  consume(TokenType::RParen);
                  type_str += "(" + len.lexeme() + ")";
              }
@@ -193,11 +210,11 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
             Token t = peek_token();
             if (t.type() == TokenType::Primary) {
                 consume(TokenType::Primary);
-                consume(TokenType::Key);
+                if (!consume(TokenType::Key)) return nullptr;
                 stmt->get_last_column().is_primary_key_ = true;
             } else if (t.type() == TokenType::Not) {
                 consume(TokenType::Not);
-                consume(TokenType::Null);
+                if (!consume(TokenType::Null)) return nullptr;
                 stmt->get_last_column().is_not_null_ = true;
             } else if (t.type() == TokenType::Unique) {
                 consume(TokenType::Unique);
@@ -210,7 +227,7 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
         if (peek_token().type() == TokenType::RParen) break;
     }
     
-    consume(TokenType::RParen);
+    if (!consume(TokenType::RParen)) return nullptr;
     return stmt;
 }
 
@@ -220,32 +237,33 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
 std::unique_ptr<Statement> Parser::parse_insert() {
     auto stmt = std::make_unique<InsertStatement>();
     if (!consume(TokenType::Insert)) return nullptr;
-    consume(TokenType::Into);
+    if (!consume(TokenType::Into)) return nullptr;
     
-    /* Table name */
-    stmt->set_table(parse_primary());
+    auto table_expr = parse_primary();
+    if (!table_expr) return nullptr;
+    stmt->set_table(std::move(table_expr));
     
-    /* Optional columns: (id, name) */
     if (consume(TokenType::LParen)) {
         bool first = true;
         while (true) {
             if (!first && !consume(TokenType::Comma)) break;
             first = false;
-            stmt->add_column(parse_primary());
+            auto col = parse_primary();
+            if (!col) return nullptr;
+            stmt->add_column(std::move(col));
             if (peek_token().type() == TokenType::RParen) break;
         }
-        consume(TokenType::RParen);
+        if (!consume(TokenType::RParen)) return nullptr;
     }
     
     if (!consume(TokenType::Values)) return nullptr;
     
-    /* Rows: (1, 'Alice'), (2, 'Bob') */
     bool first_row = true;
     while (true) {
         if (!first_row && !consume(TokenType::Comma)) break;
         first_row = false;
         
-        if (!consume(TokenType::LParen)) break;
+        if (!consume(TokenType::LParen)) return nullptr;
         
         std::vector<std::unique_ptr<Expression>> row;
         bool first_val = true;
@@ -254,13 +272,13 @@ std::unique_ptr<Statement> Parser::parse_insert() {
             first_val = false;
             
             auto expr = parse_expression();
-            if (!expr) break;
+            if (!expr) return nullptr;
             row.push_back(std::move(expr));
             
             if (peek_token().type() == TokenType::RParen) break;
         }
         stmt->add_row(std::move(row));
-        consume(TokenType::RParen);
+        if (!consume(TokenType::RParen)) return nullptr;
         
         if (peek_token().type() != TokenType::Comma) break;
     }
@@ -275,48 +293,43 @@ std::unique_ptr<Expression> Parser::parse_expression() {
     return parse_or();
 }
 
-/**
- * @brief Parse OR expressions
- */
 std::unique_ptr<Expression> Parser::parse_or() {
     auto left = parse_and();
+    if (!left) return nullptr;
     while (peek_token().type() == TokenType::Or) {
         Token op = next_token();
         auto right = parse_and();
+        if (!right) return nullptr;
         left = std::make_unique<BinaryExpr>(std::move(left), op.type(), std::move(right));
     }
     return left;
 }
 
-/**
- * @brief Parse AND expressions
- */
 std::unique_ptr<Expression> Parser::parse_and() {
     auto left = parse_not();
+    if (!left) return nullptr;
     while (peek_token().type() == TokenType::And) {
-        Token op = next_token();
+        consume(TokenType::And);
         auto right = parse_not();
-        left = std::make_unique<BinaryExpr>(std::move(left), op.type(), std::move(right));
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryExpr>(std::move(left), TokenType::And, std::move(right));
     }
     return left;
 }
 
-/**
- * @brief Parse NOT expressions
- */
 std::unique_ptr<Expression> Parser::parse_not() {
     if (peek_token().type() == TokenType::Not) {
         consume(TokenType::Not);
-        return std::make_unique<UnaryExpr>(TokenType::Not, parse_not());
+        auto inner = parse_not();
+        if (!inner) return nullptr;
+        return std::make_unique<UnaryExpr>(TokenType::Not, std::move(inner));
     }
     return parse_compare();
 }
 
-/**
- * @brief Parse comparison expressions
- */
 std::unique_ptr<Expression> Parser::parse_compare() {
     auto left = parse_add_sub();
+    if (!left) return nullptr;
     
     Token tok = peek_token();
     if (tok.type() == TokenType::Eq || tok.type() == TokenType::Ne ||
@@ -324,56 +337,50 @@ std::unique_ptr<Expression> Parser::parse_compare() {
         tok.type() == TokenType::Gt || tok.type() == TokenType::Ge) {
         next_token();
         auto right = parse_add_sub();
+        if (!right) return nullptr;
         return std::make_unique<BinaryExpr>(std::move(left), tok.type(), std::move(right));
     }
     
     return left;
 }
 
-/**
- * @brief Parse additive expressions
- */
 std::unique_ptr<Expression> Parser::parse_add_sub() {
     auto left = parse_mul_div();
+    if (!left) return nullptr;
     while (peek_token().type() == TokenType::Plus || peek_token().type() == TokenType::Minus) {
         Token op = next_token();
         auto right = parse_mul_div();
+        if (!right) return nullptr;
         left = std::make_unique<BinaryExpr>(std::move(left), op.type(), std::move(right));
     }
     return left;
 }
 
-/**
- * @brief Parse multiplicative expressions
- */
 std::unique_ptr<Expression> Parser::parse_mul_div() {
     auto left = parse_unary();
+    if (!left) return nullptr;
     while (peek_token().type() == TokenType::Star || peek_token().type() == TokenType::Slash) {
         Token op = next_token();
         auto right = parse_unary();
+        if (!right) return nullptr;
         left = std::make_unique<BinaryExpr>(std::move(left), op.type(), std::move(right));
     }
     return left;
 }
 
-/**
- * @brief Parse unary expressions
- */
 std::unique_ptr<Expression> Parser::parse_unary() {
     if (peek_token().type() == TokenType::Minus || peek_token().type() == TokenType::Plus) {
         Token op = next_token();
-        return std::make_unique<UnaryExpr>(op.type(), parse_unary());
+        auto inner = parse_unary();
+        if (!inner) return nullptr;
+        return std::make_unique<UnaryExpr>(op.type(), std::move(inner));
     }
     return parse_primary();
 }
 
-/**
- * @brief Parse primary expressions (literals, identifiers, subqueries)
- */
 std::unique_ptr<Expression> Parser::parse_primary() {
     Token tok = peek_token();
     
-    /* Numbers */
     if (tok.type() == TokenType::Number) {
         next_token();
         if (tok.lexeme().find('.') != std::string::npos) {
@@ -382,21 +389,18 @@ std::unique_ptr<Expression> Parser::parse_primary() {
             return std::make_unique<ConstantExpr>(common::Value::make_int64(tok.as_int64()));
         }
     } 
-    /* Strings */
     else if (tok.type() == TokenType::String) {
         next_token();
         return std::make_unique<ConstantExpr>(common::Value::make_text(tok.as_string()));
     } 
-    /* Identifiers (Columns) */
     else if (tok.type() == TokenType::Identifier || tok.is_keyword()) {
-        /* Allow keywords as identifiers in expression context (e.g. column names) */
         next_token();
         return std::make_unique<ColumnExpr>(tok.lexeme());
     } 
-    /* Parenthesized Expressions */
     else if (consume(TokenType::LParen)) {
         auto expr = parse_expression();
-        consume(TokenType::RParen);
+        if (!expr) return nullptr;
+        if (!consume(TokenType::RParen)) return nullptr;
         return expr;
     }
     

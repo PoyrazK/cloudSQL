@@ -39,20 +39,21 @@ StorageManager::~StorageManager() {
  */
 bool StorageManager::open_file(const std::string& filename) {
     if (open_files_.find(filename) != open_files_.end()) {
-        return true; 
+        auto& file = open_files_[filename];
+        if (file->is_open()) return true;
+        open_files_.erase(filename);
     }
 
     std::string filepath = data_dir_ + "/" + filename;
     auto file = std::make_unique<std::fstream>();
     
-    /* Open for read/write in binary mode. Do NOT use std::ios::app as it breaks random access writes. */
+    /* Open for read/write in binary mode. */
     file->open(filepath, std::ios::in | std::ios::out | std::ios::binary);
     
     if (!file->is_open()) {
-        /* Fallback: create empty file then reopen */
+        /* Create empty file then reopen */
         file->open(filepath, std::ios::out | std::ios::binary);
         if (!file->is_open()) {
-            std::cerr << "Failed to create file: " << filepath << std::endl;
             return false;
         }
         file->close();
@@ -60,7 +61,6 @@ bool StorageManager::open_file(const std::string& filename) {
     }
 
     if (!file->is_open()) {
-        std::cerr << "Failed to open file: " << filepath << std::endl;
         return false;
     }
 
@@ -92,20 +92,18 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
     }
 
     auto& file = open_files_[filename];
-    file->clear(); // Clear EOF/fail bits before seek
+    file->clear(); /* Clear flags like EOF */
     file->seekg(static_cast<std::streamoff>(page_num) * PAGE_SIZE, std::ios::beg);
     
     if (file->fail()) {
-        /* If we sought past the end, it's effectively an empty page for now */
-        std::fill(buffer, buffer + PAGE_SIZE, 0);
-        return true;
+        return false;
     }
 
     file->read(buffer, PAGE_SIZE);
     
-    if (file->gcount() != PAGE_SIZE) {
-        if (file->eof()) {
-            /* Partial read at EOF: zero-fill the rest */
+    if (file->gcount() < (std::streamsize)PAGE_SIZE) {
+        if (file->eof() || file->gcount() == 0) {
+            /* If we reached end of file or read nothing, zero-fill the rest */
             std::fill(buffer + file->gcount(), buffer + PAGE_SIZE, 0);
             file->clear();
             return true;
@@ -127,7 +125,7 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num, 
     }
 
     auto& file = open_files_[filename];
-    file->clear(); // Clear bits
+    file->clear();
     file->seekp(static_cast<std::streamoff>(page_num) * PAGE_SIZE, std::ios::beg);
     
     if (file->fail()) return false;
@@ -149,7 +147,6 @@ bool StorageManager::create_dir_if_not_exists() {
     struct stat st;
     if (stat(data_dir_.c_str(), &st) != 0) {
         if (mkdir(data_dir_.c_str(), 0755) != 0) {
-            std::cerr << "Failed to create data directory: " << data_dir_ << std::endl;
             return false;
         }
     }

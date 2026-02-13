@@ -6,6 +6,7 @@
 #include "storage/heap_table.hpp"
 #include <cstring>
 #include <sstream>
+#include <iostream>
 
 namespace cloudsql {
 namespace storage {
@@ -36,20 +37,30 @@ bool HeapTable::Iterator::next(executor::Tuple& out_tuple) {
             return true;
         }
 
-        /* No more tuples on this page, move to next page */
+        /* Check if we reached the end of this page's defined slots */
+        char buf[StorageManager::PAGE_SIZE];
+        if (table_.read_page(current_id_.page_num, buf)) {
+            PageHeader* header = reinterpret_cast<PageHeader*>(buf);
+            if (current_id_.slot_num < header->num_slots) {
+                /* There are more slots but they are empty/deleted, just increment and continue */
+                current_id_.slot_num++;
+                continue;
+            }
+        }
+
+        /* Move to next page */
         current_id_.page_num++;
         current_id_.slot_num = 0;
 
         /* If we fail to read the next page, we are at EOF */
-        char buffer[StorageManager::PAGE_SIZE];
-        if (!table_.read_page(current_id_.page_num, buffer)) {
+        if (!table_.read_page(current_id_.page_num, buf)) {
             eof_ = true;
             return false;
         }
         
-        /* Check if the page is empty/newly created */
-        PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
-        if (header->num_slots == 0) {
+        /* Check if the page is initialized */
+        PageHeader* next_header = reinterpret_cast<PageHeader*>(buf);
+        if (next_header->free_space_offset == 0) {
             eof_ = true;
             return false;
         }
@@ -63,62 +74,70 @@ HeapTable::TupleId HeapTable::insert(const executor::Tuple& tuple) {
     uint32_t page_num = 0;
     char buffer[StorageManager::PAGE_SIZE];
     
-    while (read_page(page_num, buffer)) {
+    while (true) {
+        if (!read_page(page_num, buffer)) {
+            /* Create new page */
+            std::memset(buffer, 0, StorageManager::PAGE_SIZE);
+            PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
+            header->free_space_offset = sizeof(PageHeader) + (64 * sizeof(uint16_t));
+            header->num_slots = 0;
+            write_page(page_num, buffer);
+        }
+
         PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
-        
-        /* Initialize header if it's a new/uninitialized page */
         if (header->free_space_offset == 0) {
-            header->free_space_offset = sizeof(PageHeader) + (32 * sizeof(uint16_t));
+            header->free_space_offset = sizeof(PageHeader) + (64 * sizeof(uint16_t));
             header->num_slots = 0;
         }
 
-        /* Serialize tuple (simple string format for now) */
         std::string data;
         for (const auto& val : tuple.values()) {
             data += val.to_string() + "|";
         }
 
-        /* Check if it fits */
         uint16_t required = static_cast<uint16_t>(data.size() + 1);
-        uint16_t slot_array_size = (header->num_slots + 1) * sizeof(uint16_t);
+        uint16_t slot_array_end = sizeof(PageHeader) + ((header->num_slots + 1) * sizeof(uint16_t));
         
-        if (header->free_space_offset + required + slot_array_size <= StorageManager::PAGE_SIZE) {
-            /* Calculate position */
+        if (header->free_space_offset + required < StorageManager::PAGE_SIZE && slot_array_end < header->free_space_offset) {
+            /* Fits in this page */
             uint16_t offset = header->free_space_offset;
             std::memcpy(buffer + offset, data.c_str(), data.size() + 1);
             
-            /* Update slot array */
             uint16_t* slots = reinterpret_cast<uint16_t*>(buffer + sizeof(PageHeader));
             slots[header->num_slots] = offset;
             
+            TupleId tid(page_num, header->num_slots);
             header->num_slots++;
             header->free_space_offset += required;
             
             write_page(page_num, buffer);
-            return TupleId(page_num, header->num_slots - 1);
+            return tid;
         }
         
         page_num++;
     }
-
-    /* Create new page if needed */
-    std::memset(buffer, 0, StorageManager::PAGE_SIZE);
-    PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
-    header->free_space_offset = sizeof(PageHeader) + (32 * sizeof(uint16_t));
-    header->num_slots = 0;
-    
-    write_page(page_num, buffer);
-    return insert(tuple); 
 }
 
+/**
+ * @brief Mark a tuple as deleted
+ */
 bool HeapTable::remove(const TupleId& tuple_id) { 
-    (void)tuple_id; 
-    return true; 
+    char buffer[StorageManager::PAGE_SIZE];
+    if (!read_page(tuple_id.page_num, buffer)) return false;
+
+    PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
+    if (header->free_space_offset == 0) return false;
+    if (tuple_id.slot_num >= header->num_slots) return false;
+
+    uint16_t* slots = reinterpret_cast<uint16_t*>(buffer + sizeof(PageHeader));
+    slots[tuple_id.slot_num] = 0; /* Tombstone */
+
+    return write_page(tuple_id.page_num, buffer);
 }
 
 bool HeapTable::update(const TupleId& tuple_id, const executor::Tuple& tuple) { 
-    (void)tuple_id; 
-    (void)tuple; 
+    if (!remove(tuple_id)) return false;
+    insert(tuple);
     return true; 
 }
 
@@ -137,7 +156,6 @@ bool HeapTable::get(const TupleId& tuple_id, executor::Tuple& out_tuple) const {
     uint16_t offset = slots[tuple_id.slot_num];
     if (offset == 0) return false;
 
-    /* Deserialize using schema information */
     const char* data = buffer + offset;
     std::string s(data);
     std::stringstream ss(s);
@@ -168,14 +186,35 @@ bool HeapTable::get(const TupleId& tuple_id, executor::Tuple& out_tuple) const {
     return true; 
 }
 
-uint64_t HeapTable::tuple_count() const { return 0; }
-
-bool HeapTable::exists() const { 
-    return true; 
+uint64_t HeapTable::tuple_count() const { 
+    uint64_t count = 0;
+    uint32_t page_num = 0;
+    char buffer[StorageManager::PAGE_SIZE];
+    while (read_page(page_num, buffer)) {
+        PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
+        if (header->free_space_offset == 0) break;
+        
+        uint16_t* slots = reinterpret_cast<uint16_t*>(buffer + sizeof(PageHeader));
+        for (int i = 0; i < header->num_slots; ++i) {
+            if (slots[i] != 0) count++;
+        }
+        page_num++;
+    }
+    return count;
 }
 
+bool HeapTable::exists() const { return true; }
+
 bool HeapTable::create() { 
-    return storage_manager_.open_file(filename_); 
+    if (!storage_manager_.open_file(filename_)) return false;
+    
+    char buffer[StorageManager::PAGE_SIZE];
+    std::memset(buffer, 0, StorageManager::PAGE_SIZE);
+    PageHeader* header = reinterpret_cast<PageHeader*>(buffer);
+    header->free_space_offset = sizeof(PageHeader) + (64 * sizeof(uint16_t));
+    header->num_slots = 0;
+    
+    return write_page(0, buffer);
 }
 
 bool HeapTable::drop() { 
