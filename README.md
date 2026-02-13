@@ -10,7 +10,7 @@ A lightweight, distributed SQL database engine. Designed for cloud environments 
 - **Slot-Based Heap Tables**: Optimized row-oriented storage with support for variable-length data.
 - **B+ Tree Indexing**: Fast secondary access paths for point lookups and ordered scans.
 - **SQL Parser**: Powerful recursive descent parser supporting DDL (`CREATE TABLE`) and DML (`INSERT`, `SELECT` with `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`).
-- **Volcano Execution Engine**: Advanced iterator-based execution supporting sequential scans, index scans, filtering, projection, and hash joins.
+- **Volcano Execution Engine**: Advanced iterator-based execution supporting sequential scans, index scans, filtering, projection, hash joins, sorting, and aggregation.
 - **PostgreSQL Wire Protocol**: Handshake and simple query protocol implementation for tool compatibility.
 
 ## Project Structure
@@ -64,6 +64,8 @@ Queries are executed using the Volcano model, allowing for scalable and modular 
 - `IndexScanOperator`: Leverages B+ Trees for high-speed lookups.
 - `FilterOperator`: Efficiently filters data based on complex expressions.
 - `ProjectOperator`: Computes results and transforms data columns.
+- `SortOperator`: Handles `ORDER BY` with multiple keys and directions.
+- `AggregateOperator`: Implements `GROUP BY` and aggregate functions (`COUNT`, `SUM`, etc.).
 - `HashJoinOperator`: Performs high-performance in-memory inner joins.
 - `LimitOperator`: Manages result set windowing.
 

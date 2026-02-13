@@ -5,6 +5,7 @@
 
 #include "executor/query_executor.hpp"
 #include <chrono>
+#include <algorithm>
 
 namespace cloudsql {
 namespace executor {
@@ -173,7 +174,60 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
         );
     }
 
-    /* 3. Project (SELECT columns) */
+    /* 3. Aggregate (GROUP BY or implicit aggregates) */
+    bool has_aggregates = false;
+    std::vector<AggregateInfo> aggs;
+    for (const auto& col : stmt.columns()) {
+        if (col->type() == parser::ExprType::Function) {
+            auto func = static_cast<const parser::FunctionExpr*>(col.get());
+            std::string name = func->name();
+            std::transform(name.begin(), name.end(), name.begin(), ::toupper);
+            
+            if (name == "COUNT" || name == "SUM" || name == "MIN" || name == "MAX" || name == "AVG") {
+                has_aggregates = true;
+                AggregateType type = AggregateType::Count;
+                if (name == "SUM") type = AggregateType::Sum;
+                else if (name == "MIN") type = AggregateType::Min;
+                else if (name == "MAX") type = AggregateType::Max;
+                else if (name == "AVG") type = AggregateType::Avg;
+
+                AggregateInfo info;
+                info.type = type;
+                info.expr = (!func->args().empty()) ? func->args()[0]->clone() : nullptr;
+                info.name = col->to_string();
+                aggs.push_back(std::move(info));
+            }
+        }
+    }
+
+    if (!stmt.group_by().empty() || has_aggregates) {
+        std::vector<std::unique_ptr<parser::Expression>> group_by;
+        for (const auto& gb : stmt.group_by()) {
+            group_by.push_back(gb->clone());
+        }
+        current_root = std::make_unique<AggregateOperator>(
+            std::move(current_root),
+            std::move(group_by),
+            std::move(aggs)
+        );
+    }
+
+    /* 4. Sort (ORDER BY) */
+    if (!stmt.order_by().empty()) {
+        std::vector<std::unique_ptr<parser::Expression>> sort_keys;
+        std::vector<bool> ascending;
+        for (const auto& ob : stmt.order_by()) {
+            sort_keys.push_back(ob->clone());
+            ascending.push_back(true); /* Default to ASC */
+        }
+        current_root = std::make_unique<SortOperator>(
+            std::move(current_root),
+            std::move(sort_keys),
+            std::move(ascending)
+        );
+    }
+
+    /* 5. Project (SELECT columns) */
     if (!stmt.columns().empty()) {
         std::vector<std::unique_ptr<parser::Expression>> projection;
         for (const auto& col : stmt.columns()) {
@@ -185,7 +239,7 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
         );
     }
 
-    /* 4. Limit */
+    /* 6. Limit */
     if (stmt.has_limit() || stmt.has_offset()) {
         current_root = std::make_unique<LimitOperator>(
             std::move(current_root),

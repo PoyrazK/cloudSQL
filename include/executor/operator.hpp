@@ -173,6 +173,74 @@ public:
 };
 
 /**
+ * @brief Sort operator (ORDER BY)
+ */
+class SortOperator : public Operator {
+private:
+    std::unique_ptr<Operator> child_;
+    std::vector<std::unique_ptr<parser::Expression>> sort_keys_;
+    std::vector<bool> ascending_;
+    std::vector<Tuple> sorted_tuples_;
+    size_t current_index_ = 0;
+    Schema schema_;
+
+public:
+    SortOperator(std::unique_ptr<Operator> child, 
+                 std::vector<std::unique_ptr<parser::Expression>> sort_keys,
+                 std::vector<bool> ascending);
+
+    bool init() override;
+    bool open() override;
+    bool next(Tuple& out_tuple) override;
+    void close() override;
+    Schema& output_schema() override;
+};
+
+/**
+ * @brief Aggregate types
+ */
+enum class AggregateType {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max
+};
+
+/**
+ * @brief Aggregate specification
+ */
+struct AggregateInfo {
+    AggregateType type;
+    std::unique_ptr<parser::Expression> expr;
+    std::string name;
+};
+
+/**
+ * @brief Aggregate operator (GROUP BY)
+ */
+class AggregateOperator : public Operator {
+private:
+    std::unique_ptr<Operator> child_;
+    std::vector<std::unique_ptr<parser::Expression>> group_by_;
+    std::vector<AggregateInfo> aggregates_;
+    std::vector<Tuple> groups_;
+    size_t current_group_ = 0;
+    Schema schema_;
+
+public:
+    AggregateOperator(std::unique_ptr<Operator> child,
+                      std::vector<std::unique_ptr<parser::Expression>> group_by,
+                      std::vector<AggregateInfo> aggregates);
+
+    bool init() override;
+    bool open() override;
+    bool next(Tuple& out_tuple) override;
+    void close() override;
+    Schema& output_schema() override;
+};
+
+/**
  * @brief Hash join operator
  */
 class HashJoinOperator : public Operator {

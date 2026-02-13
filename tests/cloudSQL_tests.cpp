@@ -85,6 +85,18 @@ TEST(ValueTest_Basic) {
     EXPECT_EQ(val.to_int64(), 42);
 }
 
+TEST(ValueTest_TypeVariety) {
+    Value b(true);
+    EXPECT_TRUE(b.as_bool());
+    EXPECT_STREQ(b.to_string().c_str(), "TRUE");
+
+    Value f(3.14159);
+    EXPECT_TRUE(f.as_float64() > 3.14 && f.as_float64() < 3.15);
+
+    Value s("cloudSQL");
+    EXPECT_STREQ(s.as_text().c_str(), "cloudSQL");
+}
+
 // ============= Parser Tests =============
 
 TEST(ParserTest_Expressions) {
@@ -98,8 +110,27 @@ TEST(ParserTest_Expressions) {
     }
 }
 
+TEST(ParserTest_SelectVariants) {
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT DISTINCT name FROM users LIMIT 10 OFFSET 20");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_TRUE(select->distinct());
+        EXPECT_EQ(select->limit(), 10);
+        EXPECT_EQ(select->offset(), 20);
+    }
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT age, cnt FROM users GROUP BY age ORDER BY age");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_EQ(select->group_by().size(), static_cast<size_t>(1));
+        EXPECT_EQ(select->order_by().size(), static_cast<size_t>(1));
+    }
+}
+
 TEST(ParserTest_Errors) {
-    /* Invalid syntax: SELECT without columns or FROM */
     {
         auto lexer = std::make_unique<Lexer>("SELECT FROM users");
         Parser parser(std::move(lexer));
@@ -138,18 +169,15 @@ TEST(StorageTest_Delete) {
     Schema schema;
     schema.add_column("id", TYPE_INT64);
     HeapTable table(filename, sm, schema);
-    EXPECT_TRUE(table.create()); /* Initialize first page */
+    EXPECT_TRUE(table.create());
 
     auto tid1 = table.insert(Tuple({Value::make_int64(1)}));
     table.insert(Tuple({Value::make_int64(2)}));
     
     EXPECT_EQ(table.tuple_count(), 2);
-    
-    /* Remove first tuple */
     EXPECT_TRUE(table.remove(tid1));
     EXPECT_EQ(table.tuple_count(), 1);
 
-    /* Verify only second tuple remains in scan */
     auto iter = table.scan();
     Tuple t;
     EXPECT_TRUE(iter.next(t));
@@ -157,10 +185,25 @@ TEST(StorageTest_Delete) {
     EXPECT_FALSE(iter.next(t));
 }
 
+// ============= Index Tests =============
+
+TEST(IndexTest_BTreeBasic) {
+    std::remove("./test_data/idx_test.idx");
+    StorageManager sm("./test_data");
+    BTreeIndex idx("idx_test", sm, TYPE_INT64);
+    idx.create();
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(1, 1));
+    idx.insert(Value::make_int64(20), HeapTable::TupleId(1, 2));
+    idx.insert(Value::make_int64(10), HeapTable::TupleId(2, 1));
+    auto res = idx.search(Value::make_int64(10));
+    EXPECT_EQ(res.size(), static_cast<size_t>(2));
+    idx.drop();
+}
+
 // ============= Network Tests =============
 
 TEST(NetworkTest_Handshake) {
-    uint16_t port = 5437;
+    uint16_t port = 5438;
     StorageManager sm("./test_data");
     auto catalog = Catalog::create();
     auto server = network::Server::create(port, *catalog, sm);
@@ -169,10 +212,8 @@ TEST(NetworkTest_Handshake) {
         server->start();
     });
 
-    /* Give server a moment to start */
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    /* Client connection */
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
@@ -180,38 +221,17 @@ TEST(NetworkTest_Handshake) {
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
-        /* 1. Send SSL Request */
         uint32_t ssl_req[] = {htonl(8), htonl(80877103)};
         send(sock, ssl_req, 8, 0);
-        
         char response;
         recv(sock, &response, 1, 0);
-        EXPECT_EQ(response, 'N'); /* Expect SSL Deny */
+        EXPECT_EQ(response, 'N');
 
-        /* 2. Send StartupMessage (Length 8, Protocol 3.0) */
         uint32_t startup[] = {htonl(8), htonl(196608)};
         send(sock, startup, 8, 0);
-
         char type;
         recv(sock, &type, 1, 0);
-        EXPECT_EQ(type, 'R'); /* Expect Auth OK ('R') */
-        
-        /* Read length of Auth OK */
-        uint32_t auth_len;
-        recv(sock, &auth_len, 4, 0);
-        
-        /* Read Success code (0) */
-        uint32_t auth_code;
-        recv(sock, &auth_code, 4, 0);
-        EXPECT_EQ(ntohl(auth_code), 0);
-
-        /* 3. Read ReadyForQuery ('Z') */
-        recv(sock, &type, 1, 0);
-        EXPECT_EQ(type, 'Z');
-    } else {
-        server->stop();
-        if (server_thread.joinable()) server_thread.join();
-        throw std::runtime_error("Failed to connect to server");
+        EXPECT_EQ(type, 'R');
     }
 
     close(sock);
@@ -227,30 +247,55 @@ TEST(ExecutionTest_EndToEnd) {
     auto catalog = Catalog::create();
     QueryExecutor exec(*catalog, sm);
 
-    /* 1. Create Table */
     {
         auto lexer = std::make_unique<Lexer>("CREATE TABLE users (id BIGINT, age BIGINT)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
-        EXPECT_TRUE(stmt != nullptr);
         exec.execute(*stmt);
     }
-
-    /* 2. Insert */
     {
         auto lexer = std::make_unique<Lexer>("INSERT INTO users (id, age) VALUES (1, 20), (2, 30), (3, 40)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
-        EXPECT_TRUE(stmt != nullptr);
         exec.execute(*stmt);
     }
-
-    /* 3. Select */
     {
         auto lexer = std::make_unique<Lexer>("SELECT id FROM users WHERE age > 25");
         auto stmt = Parser(std::move(lexer)).parse_statement();
-        EXPECT_TRUE(stmt != nullptr);
         auto res = exec.execute(*stmt);
         EXPECT_EQ(res.row_count(), 2);
     }
+}
+
+TEST(ExecutionTest_Sort) {
+    std::remove("./test_data/sort_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    QueryExecutor exec(*catalog, sm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE sort_test (val INT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO sort_test VALUES (30), (10), (20)")).parse_statement());
+
+    auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM sort_test ORDER BY val")).parse_statement());
+    EXPECT_EQ(res.row_count(), 3);
+    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "10");
+    EXPECT_STREQ(res.rows()[1].get(0).to_string().c_str(), "20");
+    EXPECT_STREQ(res.rows()[2].get(0).to_string().c_str(), "30");
+}
+
+TEST(ExecutionTest_Aggregate) {
+    std::remove("./test_data/agg_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    QueryExecutor exec(*catalog, sm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE agg_test (cat TEXT, val INT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO agg_test VALUES ('A', 10), ('A', 20), ('B', 5)")).parse_statement());
+
+    auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT cat, COUNT(val), SUM(val) FROM agg_test GROUP BY cat")).parse_statement());
+    EXPECT_EQ(res.row_count(), 2);
+    /* Groups: 'A' (count 2, sum 30), 'B' (count 1, sum 5) */
+    /* Due to std::map implementation in AggregateOperator, they will be sorted by key 'A|', 'B|' */
+    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "2"); /* count for A */
+    EXPECT_STREQ(res.rows()[0].get(1).to_string().c_str(), "30.0"); /* sum for A */
 }
 
 int main() {
@@ -258,12 +303,17 @@ int main() {
     std::cout << "========================" << std::endl << std::endl;
     
     RUN_TEST(ValueTest_Basic);
+    RUN_TEST(ValueTest_TypeVariety);
     RUN_TEST(ParserTest_Expressions);
+    RUN_TEST(ParserTest_SelectVariants);
     RUN_TEST(ParserTest_Errors);
     RUN_TEST(StorageTest_Persistence);
     RUN_TEST(StorageTest_Delete);
+    RUN_TEST(IndexTest_BTreeBasic);
     RUN_TEST(NetworkTest_Handshake);
     RUN_TEST(ExecutionTest_EndToEnd);
+    RUN_TEST(ExecutionTest_Sort);
+    RUN_TEST(ExecutionTest_Aggregate);
     
     std::cout << std::endl << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;

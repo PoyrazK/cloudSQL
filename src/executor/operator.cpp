@@ -7,6 +7,8 @@
  */
 
 #include "executor/operator.hpp"
+#include <algorithm>
+#include <map>
 
 namespace cloudsql {
 namespace executor {
@@ -87,6 +89,7 @@ bool IndexScanOperator::next(Tuple& out_tuple) {
         return true;
     }
 
+    /* If tuple not found (shouldn't happen in consistent index), try next match */
     return next(out_tuple);
 }
 
@@ -117,6 +120,7 @@ bool FilterOperator::open() {
 bool FilterOperator::next(Tuple& out_tuple) {
     Tuple tuple;
     while (child_->next(tuple)) {
+        /* Evaluate condition against the current tuple context */
         common::Value result = condition_->evaluate(&tuple, &schema_);
         if (result.as_bool()) {
             out_tuple = std::move(tuple);
@@ -140,7 +144,12 @@ void FilterOperator::add_child(std::unique_ptr<Operator> child) { child_ = std::
 
 ProjectOperator::ProjectOperator(std::unique_ptr<Operator> child, std::vector<std::unique_ptr<parser::Expression>> columns)
     : Operator(OperatorType::Project), child_(std::move(child)), columns_(std::move(columns)) {
-    if (child_) schema_ = child_->output_schema();
+    if (child_) {
+        /* Result schema depends on expression aliases/names, simplified for now */
+        for (size_t i = 0; i < columns_.size(); ++i) {
+            schema_.add_column(columns_[i]->to_string(), common::TYPE_TEXT);
+        }
+    }
 }
 
 bool ProjectOperator::init() {
@@ -161,8 +170,10 @@ bool ProjectOperator::next(Tuple& out_tuple) {
     }
     
     std::vector<common::Value> output_values;
+    auto input_schema = child_->output_schema();
     for (const auto& col : columns_) {
-        output_values.push_back(col->evaluate(&input, &schema_));
+        /* Evaluate projection expression with input tuple context */
+        output_values.push_back(col->evaluate(&input, &input_schema));
     }
     out_tuple = Tuple(std::move(output_values));
     return true;
@@ -176,6 +187,154 @@ void ProjectOperator::close() {
 Schema& ProjectOperator::output_schema() { return schema_; }
 
 void ProjectOperator::add_child(std::unique_ptr<Operator> child) { child_ = std::move(child); }
+
+/* --- SortOperator --- */
+
+SortOperator::SortOperator(std::unique_ptr<Operator> child, 
+                           std::vector<std::unique_ptr<parser::Expression>> sort_keys,
+                           std::vector<bool> ascending)
+    : Operator(OperatorType::Sort), child_(std::move(child)), sort_keys_(std::move(sort_keys)), ascending_(std::move(ascending)) {
+    if (child_) schema_ = child_->output_schema();
+}
+
+bool SortOperator::init() { return child_->init(); }
+
+bool SortOperator::open() {
+    if (!child_->open()) return false;
+    
+    sorted_tuples_.clear();
+    Tuple tuple;
+    while (child_->next(tuple)) {
+        sorted_tuples_.push_back(std::move(tuple));
+    }
+
+    /* Perform sort using child schema for evaluation */
+    std::stable_sort(sorted_tuples_.begin(), sorted_tuples_.end(), [this](const Tuple& a, const Tuple& b) {
+        for (size_t i = 0; i < sort_keys_.size(); ++i) {
+            common::Value val_a = sort_keys_[i]->evaluate(&a, &schema_);
+            common::Value val_b = sort_keys_[i]->evaluate(&b, &schema_);
+            bool asc = static_cast<bool>(ascending_[i]);
+            if (val_a < val_b) return asc;
+            if (val_b < val_a) return !asc;
+        }
+        return false;
+    });
+
+    current_index_ = 0;
+    state_ = ExecState::Open;
+    return true;
+}
+
+bool SortOperator::next(Tuple& out_tuple) {
+    if (current_index_ >= sorted_tuples_.size()) {
+        state_ = ExecState::Done;
+        return false;
+    }
+    out_tuple = std::move(sorted_tuples_[current_index_++]);
+    return true;
+}
+
+void SortOperator::close() {
+    sorted_tuples_.clear();
+    child_->close();
+    state_ = ExecState::Done;
+}
+
+Schema& SortOperator::output_schema() { return schema_; }
+
+/* --- AggregateOperator --- */
+
+AggregateOperator::AggregateOperator(std::unique_ptr<Operator> child,
+                                     std::vector<std::unique_ptr<parser::Expression>> group_by,
+                                     std::vector<AggregateInfo> aggregates)
+    : Operator(OperatorType::Aggregate), child_(std::move(child)), 
+      group_by_(std::move(group_by)), aggregates_(std::move(aggregates)) {
+    
+    /* Build schema: Group-by columns first, then aggregates */
+    if (child_) {
+        for (const auto& gb : group_by_) {
+            schema_.add_column(gb->to_string(), common::TYPE_TEXT);
+        }
+        for (const auto& agg : aggregates_) {
+            schema_.add_column(agg.name, common::TYPE_FLOAT64);
+        }
+    }
+}
+
+bool AggregateOperator::init() { return child_->init(); }
+
+bool AggregateOperator::open() {
+    if (!child_->open()) return false;
+
+    struct GroupState {
+        std::vector<common::Value> group_values;
+        std::vector<int64_t> counts;
+        std::vector<double> sums;
+    };
+    std::map<std::string, GroupState> groups_map;
+
+    Tuple tuple;
+    auto child_schema = child_->output_schema();
+    while (child_->next(tuple)) {
+        std::string key;
+        std::vector<common::Value> gb_vals;
+        for (const auto& gb : group_by_) {
+            auto val = gb->evaluate(&tuple, &child_schema);
+            key += val.to_string() + "|";
+            gb_vals.push_back(std::move(val));
+        }
+
+        auto& state = groups_map[key];
+        if (state.counts.empty()) {
+            state.group_values = std::move(gb_vals);
+            state.counts.resize(aggregates_.size(), 0);
+            state.sums.resize(aggregates_.size(), 0.0);
+        }
+
+        for (size_t i = 0; i < aggregates_.size(); ++i) {
+            state.counts[i]++;
+            if (aggregates_[i].expr) {
+                common::Value val = aggregates_[i].expr->evaluate(&tuple, &child_schema);
+                if (val.is_numeric()) state.sums[i] += val.to_float64();
+            }
+        }
+    }
+
+    groups_.clear();
+    for (auto& pair : groups_map) {
+        auto& state = pair.second;
+        std::vector<common::Value> row = std::move(state.group_values);
+        for (size_t i = 0; i < aggregates_.size(); ++i) {
+            if (aggregates_[i].type == AggregateType::Count) {
+                row.push_back(common::Value::make_int64(state.counts[i]));
+            } else {
+                row.push_back(common::Value::make_float64(state.sums[i]));
+            }
+        }
+        groups_.push_back(Tuple(std::move(row)));
+    }
+
+    current_group_ = 0;
+    state_ = ExecState::Open;
+    return true;
+}
+
+bool AggregateOperator::next(Tuple& out_tuple) {
+    if (current_group_ >= groups_.size()) {
+        state_ = ExecState::Done;
+        return false;
+    }
+    out_tuple = std::move(groups_[current_group_++]);
+    return true;
+}
+
+void AggregateOperator::close() {
+    groups_.clear();
+    child_->close();
+    state_ = ExecState::Done;
+}
+
+Schema& AggregateOperator::output_schema() { return schema_; }
 
 /* --- HashJoinOperator --- */
 
@@ -290,6 +449,7 @@ bool LimitOperator::init() {
 bool LimitOperator::open() {
     if (!child_->open()) return false;
     
+    /* Skip offset rows */
     Tuple tuple;
     while (current_count_ < offset_ && child_->next(tuple)) {
         current_count_++;
