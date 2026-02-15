@@ -184,7 +184,8 @@ Token Lexer::read_number() {
     }
     
     // Check for decimal point
-    if (current_char_ == '.' && position_ + 1 < input_.size() && is_digit()) {
+    if (current_char_ == '.' && position_ + 1 < input_.size() && (input_[position_ + 1] >= '0' && input_[position_ + 1] <= '9')) {
+        // std::cerr << "DEBUG Lexer: Entering decimal block for " << number_str << std::endl;
         number_str += current_char_;
         advance();
         while (is_digit()) {
@@ -206,16 +207,24 @@ Token Lexer::read_number() {
             }
         }
         
-        double value = std::stod(number_str);
+        try {
+            double value = std::stod(number_str);
+            Token tok(TokenType::Number, value);
+            tok.set_position(start_line, start_col);
+            return tok;
+        } catch (...) {
+            // Fallback
+        }
+    }
+    
+    try {
+        int64_t value = std::stoll(number_str);
         Token tok(TokenType::Number, value);
         tok.set_position(start_line, start_col);
         return tok;
+    } catch (...) {
+        return make_error("Invalid number literal: " + number_str);
     }
-    
-    int64_t value = std::stoll(number_str);
-    Token tok(TokenType::Number, value);
-    tok.set_position(start_line, start_col);
-    return tok;
 }
 
 /**

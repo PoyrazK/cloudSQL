@@ -223,6 +223,33 @@ public:
     std::string to_string() const override;
 };
 
+/**
+ * @brief BEGIN statement
+ */
+class TransactionBeginStatement : public Statement {
+public:
+    StmtType type() const override { return StmtType::TransactionBegin; }
+    std::string to_string() const override { return "BEGIN"; }
+};
+
+/**
+ * @brief COMMIT statement
+ */
+class TransactionCommitStatement : public Statement {
+public:
+    StmtType type() const override { return StmtType::TransactionCommit; }
+    std::string to_string() const override { return "COMMIT"; }
+};
+
+/**
+ * @brief ROLLBACK statement
+ */
+class TransactionRollbackStatement : public Statement {
+public:
+    StmtType type() const override { return StmtType::TransactionRollback; }
+    std::string to_string() const override { return "ROLLBACK"; }
+};
+
 }  // namespace parser
 }  // namespace cloudsql
 

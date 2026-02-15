@@ -38,12 +38,28 @@ std::unique_ptr<Statement> Parser::parse_statement() {
         case TokenType::Insert:
             stmt = parse_insert();
             break;
+        case TokenType::Update:
+            stmt = parse_update();
+            break;
+        case TokenType::Delete:
+            stmt = parse_delete();
+            break;
+        case TokenType::Begin:
+            next_token();
+            stmt = std::make_unique<TransactionBeginStatement>();
+            break;
+        case TokenType::Commit:
+            next_token();
+            stmt = std::make_unique<TransactionCommitStatement>();
+            break;
+        case TokenType::Rollback:
+            next_token();
+            stmt = std::make_unique<TransactionRollbackStatement>();
+            break;
         default:
             break;
     }
 
-    /* If we didn't consume the whole input or have trailing garbage, it might be an error */
-    /* For this simple parser, we'll just check if stmt is valid */
     return stmt;
 }
 
@@ -66,7 +82,10 @@ std::unique_ptr<Statement> Parser::parse_select() {
         first = false;
         
         auto expr = parse_expression();
-        if (!expr) return nullptr; /* Failure */
+        if (!expr) {
+            std::cerr << "Parser Error: Invalid column expression" << std::endl;
+            return nullptr;
+        }
         stmt->add_column(std::move(expr));
         
         if (peek_token().type() == TokenType::From) break;
@@ -75,10 +94,14 @@ std::unique_ptr<Statement> Parser::parse_select() {
     /* FROM */
     if (consume(TokenType::From)) {
         auto from_expr = parse_expression();
-        if (!from_expr) return nullptr;
+        if (!from_expr) {
+            std::cerr << "Parser Error: Invalid FROM expression" << std::endl;
+            return nullptr;
+        }
         stmt->add_from(std::move(from_expr));
     } else {
-        return nullptr; /* SELECT must have FROM in our implementation */
+        std::cerr << "Parser Error: Missing FROM clause. Current token: " << peek_token().to_string() << std::endl;
+        return nullptr;
     }
     
     /* WHERE */
@@ -163,6 +186,7 @@ std::unique_ptr<Statement> Parser::parse_select() {
     return stmt;
 }
 
+
 /**
  * @brief Parse CREATE TABLE statement
  */
@@ -176,9 +200,7 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
     }
     
     Token name = next_token();
-    if (name.type() != TokenType::Identifier) {
-        return nullptr;
-    }
+    if (name.type() != TokenType::Identifier) return nullptr;
     stmt->set_table_name(name.lexeme());
     
     if (!consume(TokenType::LParen)) return nullptr;
@@ -205,7 +227,6 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
         
         stmt->add_column(col_name.lexeme(), type_str);
         
-        /* Constraints */
         while (true) {
             Token t = peek_token();
             if (t.type() == TokenType::Primary) {
@@ -239,18 +260,20 @@ std::unique_ptr<Statement> Parser::parse_insert() {
     if (!consume(TokenType::Insert)) return nullptr;
     if (!consume(TokenType::Into)) return nullptr;
     
-    auto table_expr = parse_primary();
-    if (!table_expr) return nullptr;
-    stmt->set_table(std::move(table_expr));
+    Token table_tok = next_token();
+    if (table_tok.type() != TokenType::Identifier) return nullptr;
+    stmt->set_table(std::make_unique<ColumnExpr>(table_tok.lexeme()));
     
     if (consume(TokenType::LParen)) {
         bool first = true;
         while (true) {
             if (!first && !consume(TokenType::Comma)) break;
             first = false;
-            auto col = parse_primary();
-            if (!col) return nullptr;
-            stmt->add_column(std::move(col));
+            
+            Token col_tok = next_token();
+            if (col_tok.type() != TokenType::Identifier) return nullptr;
+            stmt->add_column(std::make_unique<ColumnExpr>(col_tok.lexeme()));
+            
             if (peek_token().type() == TokenType::RParen) break;
         }
         if (!consume(TokenType::RParen)) return nullptr;
@@ -283,6 +306,67 @@ std::unique_ptr<Statement> Parser::parse_insert() {
         if (peek_token().type() != TokenType::Comma) break;
     }
     
+    return stmt;
+}
+
+/**
+ * @brief Parse UPDATE statement
+ */
+std::unique_ptr<Statement> Parser::parse_update() {
+    auto stmt = std::make_unique<UpdateStatement>();
+    if (!consume(TokenType::Update)) return nullptr;
+
+    Token table_tok = next_token();
+    if (table_tok.type() != TokenType::Identifier) return nullptr;
+    stmt->set_table(std::make_unique<ColumnExpr>(table_tok.lexeme()));
+
+    if (!consume(TokenType::Set)) return nullptr;
+
+    bool first = true;
+    while (true) {
+        if (!first && !consume(TokenType::Comma)) break;
+        first = false;
+
+        Token col_tok = next_token();
+        if (col_tok.type() != TokenType::Identifier) return nullptr;
+
+        if (!consume(TokenType::Eq)) return nullptr;
+
+        auto val_expr = parse_expression();
+        if (!val_expr) return nullptr;
+
+        stmt->add_set(std::make_unique<ColumnExpr>(col_tok.lexeme()), std::move(val_expr));
+
+        if (peek_token().type() != TokenType::Comma) break;
+    }
+
+    if (consume(TokenType::Where)) {
+        auto where_expr = parse_expression();
+        if (!where_expr) return nullptr;
+        stmt->set_where(std::move(where_expr));
+    }
+
+    return stmt;
+}
+
+/**
+ * @brief Parse DELETE statement
+ */
+std::unique_ptr<Statement> Parser::parse_delete() {
+    auto stmt = std::make_unique<DeleteStatement>();
+    if (!consume(TokenType::Delete)) return nullptr;
+    if (!consume(TokenType::From)) return nullptr;
+
+    Token table_tok = next_token();
+    if (table_tok.type() != TokenType::Identifier) return nullptr;
+    stmt->set_table(std::make_unique<ColumnExpr>(table_tok.lexeme()));
+
+    if (consume(TokenType::Where)) {
+        auto where_expr = parse_expression();
+        if (!where_expr) return nullptr;
+        stmt->set_where(std::move(where_expr));
+    }
+
     return stmt;
 }
 
@@ -394,16 +478,56 @@ std::unique_ptr<Expression> Parser::parse_primary() {
         return std::make_unique<ConstantExpr>(common::Value::make_text(tok.as_string()));
     } 
     else if (tok.type() == TokenType::Identifier || tok.is_keyword()) {
-        next_token();
-        return std::make_unique<ColumnExpr>(tok.lexeme());
+        Token id = next_token();
+        /* Check if it's a function call */
+        if (peek_token().type() == TokenType::LParen) {
+            consume(TokenType::LParen);
+            
+            /* Normalize function name to uppercase for consistency */
+            std::string func_name = id.lexeme();
+            std::transform(func_name.begin(), func_name.end(), func_name.begin(), ::toupper);
+            
+            auto func = std::make_unique<FunctionExpr>(func_name);
+            
+            /* Handle DISTINCT inside function call, e.g. COUNT(DISTINCT col) */
+            if (peek_token().type() == TokenType::Distinct) {
+                consume(TokenType::Distinct);
+                func->set_distinct(true);
+            }
+
+            bool first = true;
+            while (peek_token().type() != TokenType::RParen) {
+                if (!first && !consume(TokenType::Comma)) break;
+                first = false;
+                auto arg = parse_expression();
+                if (!arg) {
+                    std::cerr << "DEBUG: Failed to parse function arg for " << func_name << std::endl;
+                    return nullptr;
+                }
+                func->add_arg(std::move(arg));
+            }
+            if (!consume(TokenType::RParen)) {
+                std::cerr << "DEBUG: Missing RParen for function " << func_name << std::endl;
+                return nullptr;
+            }
+            return func;
+        }
+        return std::make_unique<ColumnExpr>(id.lexeme());
     } 
     else if (consume(TokenType::LParen)) {
         auto expr = parse_expression();
-        if (!expr) return nullptr;
-        if (!consume(TokenType::RParen)) return nullptr;
+        if (!expr) {
+            std::cerr << "DEBUG: Failed to parse expression inside LParen" << std::endl;
+            return nullptr;
+        }
+        if (!consume(TokenType::RParen)) {
+            std::cerr << "DEBUG: Missing RParen after expression" << std::endl;
+            return nullptr;
+        }
         return expr;
     }
     
+    std::cerr << "DEBUG: Unrecognized primary token: " << tok.to_string() << std::endl;
     return nullptr;
 }
 
