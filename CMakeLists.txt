@@ -69,6 +69,22 @@ if(BUILD_TESTS)
     add_executable(sqlEngine_tests tests/cloudSQL_tests.cpp)
     target_link_libraries(sqlEngine_tests PRIVATE sqlEngineCore)
     
+    # Create lock manager unit tests
+    add_executable(lock_manager_tests tests/lock_manager_tests.cpp)
+    target_link_libraries(lock_manager_tests PRIVATE sqlEngineCore)
+
+    # Create server unit tests
+    add_executable(server_tests tests/server_tests.cpp)
+    target_link_libraries(server_tests PRIVATE sqlEngineCore)
+
+    # Create transaction manager unit tests
+    add_executable(transaction_manager_tests tests/transaction_manager_tests.cpp)
+    target_link_libraries(transaction_manager_tests PRIVATE sqlEngineCore)
+
+    # Create statement unit tests
+    add_executable(statement_tests tests/statement_tests.cpp)
+    target_link_libraries(statement_tests PRIVATE sqlEngineCore)
+
     # Check if GoogleTest is available
     find_package(GTest QUIET)
     if(GTest_FOUND)
