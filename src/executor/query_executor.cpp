@@ -44,6 +44,10 @@ QueryResult QueryExecutor::execute(const parser::Statement& stmt) {
             result = execute_select(static_cast<const parser::SelectStatement&>(stmt), txn);
         } else if (stmt.type() == parser::StmtType::CreateTable) {
             result = execute_create_table(static_cast<const parser::CreateTableStatement&>(stmt));
+        } else if (stmt.type() == parser::StmtType::DropTable) {
+            result = execute_drop_table(static_cast<const parser::DropTableStatement&>(stmt));
+        } else if (stmt.type() == parser::StmtType::DropIndex) {
+            result = execute_drop_index(static_cast<const parser::DropIndexStatement&>(stmt));
         } else if (stmt.type() == parser::StmtType::Insert) {
             result = execute_insert(static_cast<const parser::InsertStatement&>(stmt), txn);
         } else if (stmt.type() == parser::StmtType::Delete) {
@@ -330,27 +334,92 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt, t
 }
 
 std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatement& stmt, transaction::Transaction* txn) {
-    /* 1. Base: SeqScan */
+    /* 1. Base: SeqScan of the initial table */
     if (!stmt.from()) return nullptr;
     
-    std::string table_name = stmt.from()->to_string();
-    auto table_meta = catalog_.get_table_by_name(table_name);
-    if (!table_meta) return nullptr;
+    std::string base_table_name = stmt.from()->to_string();
+    auto base_table_meta = catalog_.get_table_by_name(base_table_name);
+    if (!base_table_meta) return nullptr;
 
-    /* Construct Schema for HeapTable */
-    Schema schema;
-    for (const auto& col : (*table_meta)->columns) {
-        schema.add_column(col.name, col.type);
+    Schema base_schema;
+    for (const auto& col : (*base_table_meta)->columns) {
+        base_schema.add_column(col.name, col.type);
     }
 
-    auto scan = std::make_unique<SeqScanOperator>(
-        std::make_unique<storage::HeapTable>(table_name, storage_manager_, schema),
+    std::unique_ptr<Operator> current_root = std::make_unique<SeqScanOperator>(
+        std::make_unique<storage::HeapTable>(base_table_name, storage_manager_, base_schema),
         txn, &lock_manager_
     );
 
-    std::unique_ptr<Operator> current_root = std::move(scan);
+    /* 2. Add JOINs */
+    for (const auto& join : stmt.joins()) {
+        std::string join_table_name = join.table->to_string();
+        auto join_table_meta = catalog_.get_table_by_name(join_table_name);
+        if (!join_table_meta) return nullptr;
 
-    /* 2. Filter (WHERE) */
+        Schema join_schema;
+        for (const auto& col : (*join_table_meta)->columns) {
+            join_schema.add_column(col.name, col.type);
+        }
+
+        auto join_scan = std::make_unique<SeqScanOperator>(
+            std::make_unique<storage::HeapTable>(join_table_name, storage_manager_, join_schema),
+            txn, &lock_manager_
+        );
+
+        /* For now, we use HashJoin if a condition exists, otherwise NestedLoop would be needed.
+         * Note: HashJoin requires equality condition. We'll assume equality for now or default to NLJ.
+         * Currently cloudSQL only has HashJoin implemented in operator.cpp.
+         */
+        
+        bool use_hash_join = false;
+        std::unique_ptr<parser::Expression> left_key = nullptr;
+        std::unique_ptr<parser::Expression> right_key = nullptr;
+
+        if (join.condition && join.condition->type() == parser::ExprType::Binary) {
+            auto bin_expr = static_cast<const parser::BinaryExpr*>(join.condition.get());
+            if (bin_expr->op() == parser::TokenType::Eq) {
+                /* Check which side of Eq belongs to which table */
+                auto left_side_schema = current_root->output_schema();
+                auto right_side_schema = join_scan->output_schema();
+                
+                std::string left_col_name = bin_expr->left().to_string();
+                std::string right_col_name = bin_expr->right().to_string();
+                
+                bool left_in_left = (left_side_schema.find_column(left_col_name) != static_cast<size_t>(-1));
+                bool right_in_right = (right_side_schema.find_column(right_col_name) != static_cast<size_t>(-1));
+                
+                if (left_in_left && right_in_right) {
+                    use_hash_join = true;
+                    left_key = bin_expr->left().clone();
+                    right_key = bin_expr->right().clone();
+                } else {
+                    bool left_in_right = (right_side_schema.find_column(left_col_name) != static_cast<size_t>(-1));
+                    bool right_in_left = (left_side_schema.find_column(right_col_name) != static_cast<size_t>(-1));
+                    
+                    if (left_in_right && right_in_left) {
+                        use_hash_join = true;
+                        left_key = bin_expr->right().clone();
+                        right_key = bin_expr->left().clone();
+                    }
+                }
+            }
+        }
+
+        if (use_hash_join) {
+            current_root = std::make_unique<HashJoinOperator>(
+                std::move(current_root),
+                std::move(join_scan),
+                std::move(left_key),
+                std::move(right_key)
+            );
+        } else {
+            /* TODO: Implement NestedLoopJoin for non-equality or missing conditions */
+            return nullptr; 
+        }
+    }
+
+    /* 3. Filter (WHERE) */
     if (stmt.where()) {
         current_root = std::make_unique<FilterOperator>(
             std::move(current_root),
@@ -440,6 +509,80 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
     }
 
     return current_root;
+}
+
+QueryResult QueryExecutor::execute_drop_table(const parser::DropTableStatement& stmt) {
+    QueryResult result;
+    auto table_meta = catalog_.get_table_by_name(stmt.table_name());
+    
+    if (!table_meta) {
+        if (stmt.if_exists()) {
+            result.set_rows_affected(0);
+            return result;
+        }
+        result.set_error("Table not found: " + stmt.table_name());
+        return result;
+    }
+
+    oid_t table_id = (*table_meta)->table_id;
+    
+    /* 1. Drop associated indexes from physical storage */
+    auto indexes = catalog_.get_table_indexes(table_id);
+    for (const auto& idx_info : indexes) {
+        storage::BTreeIndex idx(idx_info->name, storage_manager_, common::TYPE_NULL);
+        idx.drop();
+    }
+
+    /* 2. Drop table physical file */
+    storage::HeapTable table(stmt.table_name(), storage_manager_, executor::Schema());
+    table.drop();
+
+    /* 3. Update catalog */
+    if (!catalog_.drop_table(table_id)) {
+        result.set_error("Failed to drop table from catalog");
+        return result;
+    }
+
+    result.set_rows_affected(1);
+    return result;
+}
+
+QueryResult QueryExecutor::execute_drop_index(const parser::DropIndexStatement& stmt) {
+    QueryResult result;
+    
+    /* Find index by name since catalog doesn't have direct get_index_by_name */
+    oid_t index_id = 0;
+    for (auto table : catalog_.get_all_tables()) {
+        for (auto& idx : table->indexes) {
+            if (idx.name == stmt.index_name()) {
+                index_id = idx.index_id;
+                break;
+            }
+        }
+        if (index_id != 0) break;
+    }
+    
+    if (index_id == 0) {
+        if (stmt.if_exists()) {
+            result.set_rows_affected(0);
+            return result;
+        }
+        result.set_error("Index not found: " + stmt.index_name());
+        return result;
+    }
+
+    /* 1. Drop physical file */
+    storage::BTreeIndex idx(stmt.index_name(), storage_manager_, common::TYPE_NULL);
+    idx.drop();
+
+    /* 2. Update catalog */
+    if (!catalog_.drop_index(index_id)) {
+        result.set_error("Failed to drop index from catalog");
+        return result;
+    }
+
+    result.set_rows_affected(1);
+    return result;
 }
 
 } // namespace executor

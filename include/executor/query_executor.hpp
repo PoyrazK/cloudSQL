@@ -41,6 +41,8 @@ private:
 
     QueryResult execute_select(const parser::SelectStatement& stmt, transaction::Transaction* txn);
     QueryResult execute_create_table(const parser::CreateTableStatement& stmt);
+    QueryResult execute_drop_table(const parser::DropTableStatement& stmt);
+    QueryResult execute_drop_index(const parser::DropIndexStatement& stmt);
     QueryResult execute_insert(const parser::InsertStatement& stmt, transaction::Transaction* txn);
     QueryResult execute_update(const parser::UpdateStatement& stmt, transaction::Transaction* txn);
     QueryResult execute_delete(const parser::DeleteStatement& stmt, transaction::Transaction* txn);
