@@ -27,6 +27,19 @@ std::string SelectStatement::to_string() const {
         result += " FROM " + from_->to_string();
     }
     
+    for (const auto& join : joins_) {
+        switch (join.type) {
+            case JoinType::Inner: result += " JOIN "; break;
+            case JoinType::Left:  result += " LEFT JOIN "; break;
+            case JoinType::Right: result += " RIGHT JOIN "; break;
+            case JoinType::Full:  result += " FULL JOIN "; break;
+        }
+        result += join.table->to_string();
+        if (join.condition) {
+            result += " ON " + join.condition->to_string();
+        }
+    }
+    
     if (where_) {
         result += " WHERE " + where_->to_string();
     }

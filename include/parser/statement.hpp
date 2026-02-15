@@ -47,9 +47,19 @@ public:
  * @brief SELECT statement
  */
 class SelectStatement : public Statement {
+public:
+    enum class JoinType { Inner, Left, Right, Full };
+    
+    struct JoinInfo {
+        JoinType type;
+        std::unique_ptr<Expression> table;
+        std::unique_ptr<Expression> condition;
+    };
+
 private:
     std::vector<std::unique_ptr<Expression>> columns_;
     std::unique_ptr<Expression> from_;
+    std::vector<JoinInfo> joins_;
     std::unique_ptr<Expression> where_;
     std::vector<std::unique_ptr<Expression>> group_by_;
     std::unique_ptr<Expression> having_;
@@ -69,6 +79,9 @@ public:
     void add_from(std::unique_ptr<Expression> table) {
         from_ = std::move(table);
     }
+    void add_join(JoinType type, std::unique_ptr<Expression> table, std::unique_ptr<Expression> condition) {
+        joins_.push_back({type, std::move(table), std::move(condition)});
+    }
     void set_where(std::unique_ptr<Expression> where) {
         where_ = std::move(where);
     }
@@ -87,6 +100,7 @@ public:
     
     const auto& columns() const { return columns_; }
     const Expression* from() const { return from_.get(); }
+    const std::vector<JoinInfo>& joins() const { return joins_; }
     const Expression* where() const { return where_.get(); }
     const auto& group_by() const { return group_by_; }
     const Expression* having() const { return having_.get(); }
@@ -221,6 +235,42 @@ public:
     const auto& columns() const { return columns_; }
     
     std::string to_string() const override;
+};
+
+/**
+ * @file DROP TABLE statement
+ */
+class DropTableStatement : public Statement {
+private:
+    std::string table_name_;
+    bool if_exists_ = false;
+public:
+    explicit DropTableStatement(std::string name, bool if_exists = false) 
+        : table_name_(std::move(name)), if_exists_(if_exists) {}
+    StmtType type() const override { return StmtType::DropTable; }
+    const std::string& table_name() const { return table_name_; }
+    bool if_exists() const { return if_exists_; }
+    std::string to_string() const override {
+        return std::string("DROP TABLE ") + (if_exists_ ? "IF EXISTS " : "") + table_name_;
+    }
+};
+
+/**
+ * @file DROP INDEX statement
+ */
+class DropIndexStatement : public Statement {
+private:
+    std::string index_name_;
+    bool if_exists_ = false;
+public:
+    explicit DropIndexStatement(std::string name, bool if_exists = false) 
+        : index_name_(std::move(name)), if_exists_(if_exists) {}
+    StmtType type() const override { return StmtType::DropIndex; }
+    const std::string& index_name() const { return index_name_; }
+    bool if_exists() const { return if_exists_; }
+    std::string to_string() const override {
+        return std::string("DROP INDEX ") + (if_exists_ ? "IF EXISTS " : "") + index_name_;
+    }
 };
 
 /**
