@@ -63,6 +63,13 @@ static int tests_failed = 0;
     } \
 } while(0)
 
+#define EXPECT_DOUBLE_EQ(a, b) do { \
+    double _a = (a); double _b = (b); \
+    if (std::abs(_a - _b) > 1e-9) { \
+        throw std::runtime_error("Expected " + std::to_string(_b) + " but got " + std::to_string(_a)); \
+    } \
+} while(0)
+
 #define EXPECT_TRUE(a) do { \
     if (!(a)) { \
         throw std::runtime_error("Expected true but got false"); \
@@ -646,6 +653,152 @@ TEST(ExecutionTest_MVCC) {
     EXPECT_STREQ(res2_post.rows()[0].get(0).to_string().c_str(), "20");
 }
 
+TEST(ExecutionTest_Join) {
+    std::remove("./test_data/users.heap");
+    std::remove("./test_data/orders.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE users (id INT, name TEXT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE orders (id INT, user_id INT, amount DOUBLE)")).parse_statement());
+
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO orders VALUES (101, 1, 50.5), (102, 1, 25.0), (103, 2, 100.0)")).parse_statement());
+
+    /* Test: INNER JOIN with sorting */
+    auto result = exec.execute(*Parser(std::make_unique<Lexer>(
+        "SELECT users.name, orders.amount FROM users JOIN orders ON users.id = orders.user_id ORDER BY orders.amount"
+    )).parse_statement());
+
+    EXPECT_EQ(result.row_count(), static_cast<size_t>(3));
+    
+    /* 25.0 (Alice), 50.5 (Alice), 100.0 (Bob) */
+    EXPECT_STREQ(result.rows()[0].get(0).to_string().c_str(), "Alice");
+    EXPECT_STREQ(result.rows()[0].get(1).to_string().c_str(), "25");
+    EXPECT_STREQ(result.rows()[2].get(0).to_string().c_str(), "Bob");
+    EXPECT_STREQ(result.rows()[2].get(1).to_string().c_str(), "100");
+}
+
+TEST(ExecutionTest_DDL) {
+    std::remove("./test_data/ddl_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    /* 1. Create and then Drop Table */
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE ddl_test (id INT)")).parse_statement());
+    EXPECT_TRUE(catalog->table_exists_by_name("ddl_test"));
+    
+    auto res_drop = exec.execute(*Parser(std::make_unique<Lexer>("DROP TABLE ddl_test")).parse_statement());
+    EXPECT_TRUE(res_drop.success());
+    EXPECT_FALSE(catalog->table_exists_by_name("ddl_test"));
+
+    /* 2. IF EXISTS */
+    auto res_drop_none = exec.execute(*Parser(std::make_unique<Lexer>("DROP TABLE IF EXISTS non_existent")).parse_statement());
+    EXPECT_TRUE(res_drop_none.success());
+
+    /* 3. Create Index and then Drop Index */
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE ddl_test (id INT)")).parse_statement());
+    // Note: Our system doesn't have a direct "CREATE INDEX" statement parsing yet, 
+    // but the catalog supports it. For now we just test that DROP INDEX works if index exists.
+    oid_t tid = (*catalog->get_table_by_name("ddl_test"))->table_id;
+    catalog->create_index("idx_ddl", tid, {0}, IndexType::BTree, true);
+    
+    auto res_drop_idx = exec.execute(*Parser(std::make_unique<Lexer>("DROP INDEX idx_ddl")).parse_statement());
+    EXPECT_TRUE(res_drop_idx.success());
+}
+
+TEST(LexerTest_Advanced) {
+    /* 1. Test comments and line tracking */
+    {
+        std::string sql = "SELECT -- comment here\n* FROM users";
+        Lexer lexer(sql);
+        auto t1 = lexer.next_token();
+        EXPECT_EQ(static_cast<int>(t1.type()), static_cast<int>(TokenType::Select));
+        auto t2 = lexer.next_token(); // Should skip comment and newline
+        EXPECT_STREQ(t2.lexeme().c_str(), "*");
+        EXPECT_EQ(t2.line(), static_cast<uint32_t>(2));
+    }
+    /* 2. Test Error and Unknown operators */
+    {
+        Lexer lexer("@");
+        auto t = lexer.next_token();
+        EXPECT_EQ(static_cast<int>(t.type()), static_cast<int>(TokenType::Error));
+    }
+}
+
+TEST(ExecutionTest_Expressions) {
+    std::remove("./test_data/expr_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE expr_test (id INT, val DOUBLE, str TEXT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO expr_test VALUES (1, 10.5, 'A'), (2, NULL, 'B'), (3, 20.0, 'C')")).parse_statement());
+
+    /* 1. Test IS NULL / IS NOT NULL */
+    {
+        auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NULL")).parse_statement());
+        EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
+        EXPECT_EQ(res.rows()[0].get(0).to_int64(), 2);
+
+        auto res2 = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NOT NULL")).parse_statement());
+        EXPECT_EQ(res2.row_count(), static_cast<size_t>(2));
+    }
+
+    /* 2. Test IN / NOT IN */
+    {
+        auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE id IN (1, 3)")).parse_statement());
+        EXPECT_EQ(res.row_count(), static_cast<size_t>(2));
+
+        auto res2 = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE str NOT IN ('A', 'C')")).parse_statement());
+        EXPECT_EQ(res2.row_count(), static_cast<size_t>(1));
+        EXPECT_EQ(res2.rows()[0].get(0).to_int64(), 2);
+    }
+
+    /* 3. Test Arithmetic and Complex Binary */
+    {
+        auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id, val * 2 + 10, val / 2, val - 5 FROM expr_test WHERE id = 1")).parse_statement());
+        EXPECT_DOUBLE_EQ(res.rows()[0].get(1).to_float64(), 31.0); // 10.5 * 2 + 10 = 31.0
+        EXPECT_DOUBLE_EQ(res.rows()[0].get(2).to_float64(), 5.25); // 10.5 / 2 = 5.25
+        EXPECT_DOUBLE_EQ(res.rows()[0].get(3).to_float64(), 5.5);  // 10.5 - 5 = 5.5
+    }
+}
+
+TEST(CatalogTest_Errors) {
+    auto catalog = Catalog::create();
+    std::vector<ColumnInfo> cols = {{"id", TYPE_INT64, 0}};
+    
+    catalog->create_table("fail_test", cols);
+    /* Duplicate table */
+    try {
+        catalog->create_table("fail_test", cols);
+    } catch (...) {}
+
+    /* Missing table */
+    EXPECT_FALSE(catalog->table_exists(9999));
+    EXPECT_FALSE(catalog->get_table(9999).has_value());
+    EXPECT_FALSE(catalog->table_exists_by_name("non_existent"));
+
+    /* Duplicate index */
+    oid_t tid = catalog->create_table("idx_fail", cols);
+    catalog->create_index("my_idx", tid, {0}, IndexType::BTree, true);
+    try {
+        catalog->create_index("my_idx", tid, {0}, IndexType::BTree, true);
+    } catch (...) {}
+
+    /* Missing index */
+    EXPECT_FALSE(catalog->get_index(8888).has_value());
+    EXPECT_FALSE(catalog->drop_index(8888));
+}
+
 int main() {
     std::cout << "cloudSQL C++ Test Suite" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
@@ -653,10 +806,12 @@ int main() {
     RUN_TEST(ValueTest_Basic);
     RUN_TEST(ValueTest_TypeVariety);
     RUN_TEST(ParserTest_Expressions);
+    RUN_TEST(LexerTest_Advanced);
     RUN_TEST(ExpressionTest_Complex);
     RUN_TEST(ParserTest_SelectVariants);
     RUN_TEST(ParserTest_Errors);
     RUN_TEST(CatalogTest_FullLifecycle);
+    RUN_TEST(CatalogTest_Errors);
     RUN_TEST(ConfigTest_Basic);
     RUN_TEST(StatementTest_ToString);
     RUN_TEST(StatementTest_Serialization);
@@ -675,6 +830,9 @@ int main() {
     RUN_TEST(ExecutionTest_Rollback);
     RUN_TEST(ExecutionTest_UpdateDelete);
     RUN_TEST(ExecutionTest_MVCC);
+    RUN_TEST(ExecutionTest_Join);
+    RUN_TEST(ExecutionTest_DDL);
+    RUN_TEST(ExecutionTest_Expressions);
     
     std::cout << std::endl << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;
