@@ -141,6 +141,7 @@ class FunctionExpr : public Expression {
 private:
     std::string func_name_;
     std::vector<std::unique_ptr<Expression>> args_;
+    bool distinct_ = false;
     
 public:
     explicit FunctionExpr(std::string name)
@@ -150,6 +151,9 @@ public:
     const std::string& name() const { return func_name_; }
     void add_arg(std::unique_ptr<Expression> arg) { args_.push_back(std::move(arg)); }
     const auto& args() const { return args_; }
+    
+    bool distinct() const { return distinct_; }
+    void set_distinct(bool distinct) { distinct_ = distinct; }
     
     common::Value evaluate(const executor::Tuple* tuple = nullptr, 
                            const executor::Schema* schema = nullptr) const override;

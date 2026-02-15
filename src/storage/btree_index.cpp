@@ -124,14 +124,6 @@ bool BTreeIndex::insert(const common::Value& key, HeapTable::TupleId tuple_id) {
                              std::to_string(tuple_id.slot_num) + "|";
 
     /* Check space (very crude) */
-    size_t used = sizeof(NodeHeader);
-    /* In this simple implementation, we just append to the string area after header */
-    /* Real implementation would use offset arrays and fixed-width slots */
-    
-    // For now, let's just append to the end of the data section
-    // We'll simulate finding the offset by summing existing data lengths if we were being fancy
-    // But let's just append.
-    
     char* data_area = buffer + sizeof(NodeHeader);
     size_t existing_len = std::strlen(data_area);
     if (existing_len + entry_data.size() + 1 > StorageManager::PAGE_SIZE - sizeof(NodeHeader)) {
@@ -156,7 +148,6 @@ std::vector<HeapTable::TupleId> BTreeIndex::search(const common::Value& key) {
     if (!read_page(leaf_page, buffer)) return {};
 
     std::vector<HeapTable::TupleId> results;
-    NodeHeader* header = reinterpret_cast<NodeHeader*>(buffer);
     
     const char* data = buffer + sizeof(NodeHeader);
     std::string s(data);

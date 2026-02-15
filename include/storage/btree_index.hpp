@@ -84,9 +84,9 @@ public:
     BTreeIndex(const BTreeIndex&) = delete;
     BTreeIndex& operator=(const BTreeIndex&) = delete;
     
-    /* Movable */
+    /* Movable (assignment deleted due to reference member) */
     BTreeIndex(BTreeIndex&&) noexcept = default;
-    BTreeIndex& operator=(BTreeIndex&&) noexcept = default;
+    BTreeIndex& operator=(BTreeIndex&&) noexcept = delete;
     
     const std::string& index_name() const { return index_name_; }
     common::ValueType key_type() const { return key_type_; }

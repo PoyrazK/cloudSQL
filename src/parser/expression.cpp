@@ -132,27 +132,37 @@ std::unique_ptr<Expression> ConstantExpr::clone() const {
 }
 
 /**
- * @brief Evaluate function expression (placeholder)
+ * @brief Evaluate function expression
  */
 common::Value FunctionExpr::evaluate(const executor::Tuple* tuple, const executor::Schema* schema) const {
-    (void)tuple; (void)schema;
+    if (!tuple || !schema) return common::Value::make_null();
+    
+    /* Attempt to look up the function result in the schema (e.g. for aggregates) */
+    size_t index = schema->find_column(this->to_string());
+    if (index != static_cast<size_t>(-1)) {
+        return tuple->get(index);
+    }
+    
     return common::Value::make_null();
 }
 
 std::string FunctionExpr::to_string() const {
     std::string result = func_name_ + "(";
+    if (distinct_) result += "DISTINCT ";
     bool first = true;
     for (const auto& arg : args_) {
         if (!first) result += ", ";
         result += arg->to_string();
         first = false;
     }
+    if (args_.empty() && func_name_ == "COUNT") result += "*";
     result += ")";
     return result;
 }
 
 std::unique_ptr<Expression> FunctionExpr::clone() const {
     auto result = std::make_unique<FunctionExpr>(func_name_);
+    result->set_distinct(distinct_);
     for (const auto& arg : args_) {
         result->add_arg(arg->clone());
     }
