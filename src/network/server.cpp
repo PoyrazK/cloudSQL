@@ -66,7 +66,7 @@ public:
 
 Server::Server(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager)
     : port_(port), listen_fd_(-1), status_(ServerStatus::Stopped)
-    , catalog_(catalog), storage_manager_(storage_manager), executor_(catalog, storage_manager) {}
+    , catalog_(catalog), storage_manager_(storage_manager), lock_manager_(), transaction_manager_(lock_manager_, catalog, storage_manager) {}
 
 std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager) {
     return std::make_unique<Server>(port, catalog, storage_manager);
@@ -170,6 +170,7 @@ void Server::accept_connections() {
  */
 void Server::handle_connection(int client_fd) {
     char buffer[8192];
+    executor::QueryExecutor client_executor(catalog_, storage_manager_, lock_manager_, transaction_manager_);
     
     /* 1. Read Length (Initial Startup/SSL) */
     ssize_t n = recv(client_fd, buffer, 4, 0);
@@ -233,7 +234,7 @@ void Server::handle_connection(int client_fd) {
                 auto stmt = parser.parse_statement();
                 
                 if (stmt) {
-                    auto result = executor_.execute(*stmt);
+                    auto result = client_executor.execute(*stmt);
                     
                     if (result.success()) {
                         /* 1. Send RowDescription ('T') for SELECT */

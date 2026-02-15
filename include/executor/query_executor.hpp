@@ -11,6 +11,7 @@
 #include "executor/operator.hpp"
 #include "catalog/catalog.hpp"
 #include "storage/storage_manager.hpp"
+#include "transaction/transaction_manager.hpp"
 
 namespace cloudsql {
 namespace executor {
@@ -20,7 +21,10 @@ namespace executor {
  */
 class QueryExecutor {
 public:
-    QueryExecutor(Catalog& catalog, storage::StorageManager& storage_manager);
+    QueryExecutor(Catalog& catalog, 
+                  storage::StorageManager& storage_manager,
+                  transaction::LockManager& lock_manager,
+                  transaction::TransactionManager& transaction_manager);
     ~QueryExecutor() = default;
 
     /**
@@ -31,13 +35,23 @@ public:
 private:
     Catalog& catalog_;
     storage::StorageManager& storage_manager_;
+    transaction::LockManager& lock_manager_;
+    transaction::TransactionManager& transaction_manager_;
+    transaction::Transaction* current_txn_ = nullptr;
 
-    QueryResult execute_select(const parser::SelectStatement& stmt);
+    QueryResult execute_select(const parser::SelectStatement& stmt, transaction::Transaction* txn);
     QueryResult execute_create_table(const parser::CreateTableStatement& stmt);
-    QueryResult execute_insert(const parser::InsertStatement& stmt);
+    QueryResult execute_insert(const parser::InsertStatement& stmt, transaction::Transaction* txn);
+    QueryResult execute_update(const parser::UpdateStatement& stmt, transaction::Transaction* txn);
+    QueryResult execute_delete(const parser::DeleteStatement& stmt, transaction::Transaction* txn);
     
+    /* Transaction control */
+    QueryResult execute_begin();
+    QueryResult execute_commit();
+    QueryResult execute_rollback();
+
     /* Helper to build operator tree from SELECT */
-    std::unique_ptr<Operator> build_plan(const parser::SelectStatement& stmt);
+    std::unique_ptr<Operator> build_plan(const parser::SelectStatement& stmt, transaction::Transaction* txn);
 };
 
 } // namespace executor

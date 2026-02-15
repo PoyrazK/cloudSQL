@@ -21,6 +21,8 @@
 #include "catalog/catalog.hpp"
 #include "storage/storage_manager.hpp"
 #include "executor/query_executor.hpp"
+#include "transaction/lock_manager.hpp"
+#include "transaction/transaction_manager.hpp"
 
 namespace cloudsql {
 namespace network {
@@ -106,7 +108,8 @@ private:
     
     Catalog& catalog_;
     storage::StorageManager& storage_manager_;
-    executor::QueryExecutor executor_;
+    transaction::LockManager lock_manager_;
+    transaction::TransactionManager transaction_manager_;
     
     ServerStats stats_;
     std::thread accept_thread_;
