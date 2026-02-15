@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <thread>
 #include <chrono>
+#include <atomic>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -28,12 +29,15 @@
 #include "storage/storage_manager.hpp"
 #include "executor/operator.hpp"
 #include "executor/query_executor.hpp"
+#include "transaction/lock_manager.hpp"
+#include "transaction/transaction_manager.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::common;
 using namespace cloudsql::parser;
 using namespace cloudsql::executor;
 using namespace cloudsql::storage;
+using namespace cloudsql::transaction;
 
 // Simple test framework
 static int tests_passed = 0;
@@ -110,6 +114,43 @@ TEST(ParserTest_Expressions) {
     }
 }
 
+TEST(ExpressionTest_Complex) {
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT (1 > 0 AND 5 <= 2) OR NOT (1 = 1) FROM dual");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        if (!stmt) throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 1");
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        auto val = select->columns()[0]->evaluate();
+        EXPECT_FALSE(val.as_bool());
+    }
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT -10 + 20, 5 * (2 + 3) FROM dual");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        if (!stmt) throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 2");
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_EQ(select->columns()[0]->evaluate().to_int64(), 10);
+        EXPECT_EQ(select->columns()[1]->evaluate().to_int64(), 25);
+    }
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT 5.5 FROM dual");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        if (!stmt) throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3a");
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_TRUE(select->columns()[0]->evaluate().to_float64() == 5.5);
+    }
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT 10 / 2 FROM dual");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        if (!stmt) throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3b");
+        auto select = static_cast<SelectStatement*>(stmt.get());
+        EXPECT_TRUE(select->columns()[0]->evaluate().to_float64() == 5.0);
+    }
+}
+
 TEST(ParserTest_SelectVariants) {
     {
         auto lexer = std::make_unique<Lexer>("SELECT DISTINCT name FROM users LIMIT 10 OFFSET 20");
@@ -117,8 +158,8 @@ TEST(ParserTest_SelectVariants) {
         auto stmt = parser.parse_statement();
         auto select = static_cast<SelectStatement*>(stmt.get());
         EXPECT_TRUE(select->distinct());
-        EXPECT_EQ(select->limit(), 10);
-        EXPECT_EQ(select->offset(), 20);
+        EXPECT_EQ(select->limit(), static_cast<int64_t>(10));
+        EXPECT_EQ(select->offset(), static_cast<int64_t>(20));
     }
     {
         auto lexer = std::make_unique<Lexer>("SELECT age, cnt FROM users GROUP BY age ORDER BY age");
@@ -136,6 +177,93 @@ TEST(ParserTest_Errors) {
         Parser parser(std::move(lexer));
         auto stmt = parser.parse_statement();
         EXPECT_TRUE(stmt == nullptr);
+    }
+}
+
+// ============= Catalog Tests =============
+
+TEST(CatalogTest_FullLifecycle) {
+    auto catalog = Catalog::create();
+    
+    std::vector<ColumnInfo> cols = {
+        {"id", TYPE_INT64, 0},
+        {"name", TYPE_TEXT, 1}
+    };
+    
+    oid_t table_id = catalog->create_table("test_table", cols);
+    EXPECT_TRUE(table_id > 0);
+    EXPECT_TRUE(catalog->table_exists(table_id));
+    EXPECT_TRUE(catalog->table_exists_by_name("test_table"));
+    
+    auto table = catalog->get_table(table_id);
+    EXPECT_TRUE(table.has_value());
+    EXPECT_STREQ((*table)->name.c_str(), "test_table");
+    
+    catalog->update_table_stats(table_id, 100);
+    EXPECT_EQ((*table)->num_rows, static_cast<uint64_t>(100));
+    
+    oid_t idx_id = catalog->create_index("test_idx", table_id, {0}, IndexType::BTree, true);
+    EXPECT_TRUE(idx_id > 0);
+    EXPECT_EQ(catalog->get_table_indexes(table_id).size(), static_cast<size_t>(1));
+    
+    auto idx_pair = catalog->get_index(idx_id);
+    EXPECT_TRUE(idx_pair.has_value());
+    EXPECT_STREQ(idx_pair->second->name.c_str(), "test_idx");
+    
+    EXPECT_TRUE(catalog->drop_index(idx_id));
+    EXPECT_EQ(catalog->get_table_indexes(table_id).size(), static_cast<size_t>(0));
+    
+    EXPECT_TRUE(catalog->drop_table(table_id));
+    EXPECT_FALSE(catalog->table_exists(table_id));
+}
+
+// ============= Config Tests =============
+
+TEST(ConfigTest_Basic) {
+    config::Config cfg;
+    EXPECT_EQ(cfg.port, 5432);
+    
+    cfg.port = 9999;
+    cfg.data_dir = "./tmp_data";
+    
+    EXPECT_TRUE(cfg.validate());
+    
+    std::string cfg_file = "test_config.conf";
+    EXPECT_TRUE(cfg.save(cfg_file));
+    
+    config::Config cfg2;
+    EXPECT_TRUE(cfg2.load(cfg_file));
+    EXPECT_EQ(cfg2.port, 9999);
+    EXPECT_STREQ(cfg2.data_dir.c_str(), "./tmp_data");
+    
+    std::remove(cfg_file.c_str());
+}
+
+// ============= Statement Tests =============
+
+TEST(StatementTest_ToString) {
+    TransactionBeginStatement begin;
+    EXPECT_STREQ(begin.to_string().c_str(), "BEGIN");
+    
+    TransactionCommitStatement commit;
+    EXPECT_STREQ(commit.to_string().c_str(), "COMMIT");
+    
+    TransactionRollbackStatement rollback;
+    EXPECT_STREQ(rollback.to_string().c_str(), "ROLLBACK");
+}
+
+TEST(StatementTest_Serialization) {
+    {
+        auto lexer = std::make_unique<Lexer>("SELECT name, age FROM users WHERE age > 18 ORDER BY age LIMIT 10 OFFSET 5");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        EXPECT_STREQ(stmt->to_string().c_str(), "SELECT name, age FROM users WHERE age > 18 ORDER BY age LIMIT 10 OFFSET 5");
+    }
+    {
+        auto lexer = std::make_unique<Lexer>("INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')");
+        Parser parser(std::move(lexer));
+        auto stmt = parser.parse_statement();
+        EXPECT_STREQ(stmt->to_string().c_str(), "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')");
     }
 }
 
@@ -171,17 +299,17 @@ TEST(StorageTest_Delete) {
     HeapTable table(filename, sm, schema);
     EXPECT_TRUE(table.create());
 
-    auto tid1 = table.insert(Tuple({Value::make_int64(1)}));
-    table.insert(Tuple({Value::make_int64(2)}));
+    table.insert(Tuple({Value::make_int64(1)}));
+    auto tid2 = table.insert(Tuple({Value::make_int64(2)}));
     
-    EXPECT_EQ(table.tuple_count(), 2);
-    EXPECT_TRUE(table.remove(tid1));
-    EXPECT_EQ(table.tuple_count(), 1);
+    EXPECT_EQ(table.tuple_count(), static_cast<uint64_t>(2));
+    EXPECT_TRUE(table.remove(tid2, 100)); // Logically delete with xmax=100
+    EXPECT_EQ(table.tuple_count(), static_cast<uint64_t>(1));
 
     auto iter = table.scan();
     Tuple t;
     EXPECT_TRUE(iter.next(t));
-    EXPECT_EQ(t.get(0).to_int64(), 2);
+    EXPECT_EQ(t.get(0).to_int64(), 1);
     EXPECT_FALSE(iter.next(t));
 }
 
@@ -198,6 +326,23 @@ TEST(IndexTest_BTreeBasic) {
     auto res = idx.search(Value::make_int64(10));
     EXPECT_EQ(res.size(), static_cast<size_t>(2));
     idx.drop();
+}
+
+TEST(IndexTest_Scan) {
+    std::remove("./test_data/scan_test.idx");
+    StorageManager sm("./test_data");
+    BTreeIndex idx("scan_test", sm, TYPE_INT64);
+    idx.create();
+    idx.insert(Value::make_int64(1), HeapTable::TupleId(1, 1));
+    idx.insert(Value::make_int64(2), HeapTable::TupleId(1, 2));
+    
+    auto iter = idx.scan();
+    BTreeIndex::Entry entry;
+    EXPECT_TRUE(iter.next(entry));
+    EXPECT_EQ(entry.key.to_int64(), 1);
+    EXPECT_TRUE(iter.next(entry));
+    EXPECT_EQ(entry.key.to_int64(), 2);
+    EXPECT_FALSE(iter.next(entry));
 }
 
 // ============= Network Tests =============
@@ -225,16 +370,58 @@ TEST(NetworkTest_Handshake) {
         send(sock, ssl_req, 8, 0);
         char response;
         recv(sock, &response, 1, 0);
-        EXPECT_EQ(response, 'N');
+        EXPECT_EQ(static_cast<int>(response), static_cast<int>('N'));
 
         uint32_t startup[] = {htonl(8), htonl(196608)};
         send(sock, startup, 8, 0);
         char type;
         recv(sock, &type, 1, 0);
-        EXPECT_EQ(type, 'R');
+        EXPECT_EQ(static_cast<int>(type), static_cast<int>('R'));
     }
 
     close(sock);
+    /* Ensure server finishes handling the connection before stopping */
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    server->stop();
+    if (server_thread.joinable()) server_thread.join();
+}
+
+TEST(NetworkTest_MultiClient) {
+    uint16_t port = 5439;
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    auto server = network::Server::create(port, *catalog, sm);
+    
+    std::thread server_thread([&]() { server->start(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    const int num_clients = 5;
+    std::vector<std::thread> clients;
+    std::atomic<int> success_count{0};
+
+    for (int i = 0; i < num_clients; ++i) {
+        clients.emplace_back([&port, &success_count]() {
+            int sock = socket(AF_INET, SOCK_STREAM, 0);
+            struct sockaddr_in addr;
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(port);
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+            if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+                uint32_t startup[] = {htonl(8), htonl(196608)};
+                send(sock, startup, 8, 0);
+                char type;
+                if (recv(sock, &type, 1, 0) > 0 && type == 'R') {
+                    success_count++;
+                }
+            }
+            close(sock);
+        });
+    }
+
+    for (auto& t : clients) t.join();
+    EXPECT_EQ(static_cast<int>(success_count.load()), num_clients);
+
     server->stop();
     if (server_thread.joinable()) server_thread.join();
 }
@@ -245,23 +432,28 @@ TEST(ExecutionTest_EndToEnd) {
     std::remove("./test_data/users.heap");
     StorageManager sm("./test_data");
     auto catalog = Catalog::create();
-    QueryExecutor exec(*catalog, sm);
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
 
     {
         auto lexer = std::make_unique<Lexer>("CREATE TABLE users (id BIGINT, age BIGINT)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
-        exec.execute(*stmt);
+        auto res = exec.execute(*stmt);
+        if (!res.success()) throw std::runtime_error("CREATE failed: " + res.error());
     }
     {
         auto lexer = std::make_unique<Lexer>("INSERT INTO users (id, age) VALUES (1, 20), (2, 30), (3, 40)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
-        exec.execute(*stmt);
+        auto res = exec.execute(*stmt);
+        if (!res.success()) throw std::runtime_error("INSERT failed: " + res.error());
     }
     {
         auto lexer = std::make_unique<Lexer>("SELECT id FROM users WHERE age > 25");
         auto stmt = Parser(std::move(lexer)).parse_statement();
         auto res = exec.execute(*stmt);
-        EXPECT_EQ(res.row_count(), 2);
+        if (!res.success()) throw std::runtime_error("SELECT failed: " + res.error());
+        EXPECT_EQ(res.row_count(), static_cast<size_t>(2));
     }
 }
 
@@ -269,13 +461,15 @@ TEST(ExecutionTest_Sort) {
     std::remove("./test_data/sort_test.heap");
     StorageManager sm("./test_data");
     auto catalog = Catalog::create();
-    QueryExecutor exec(*catalog, sm);
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
 
     exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE sort_test (val INT)")).parse_statement());
     exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO sort_test VALUES (30), (10), (20)")).parse_statement());
 
     auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM sort_test ORDER BY val")).parse_statement());
-    EXPECT_EQ(res.row_count(), 3);
+    EXPECT_EQ(res.row_count(), static_cast<size_t>(3));
     EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "10");
     EXPECT_STREQ(res.rows()[1].get(0).to_string().c_str(), "20");
     EXPECT_STREQ(res.rows()[2].get(0).to_string().c_str(), "30");
@@ -285,17 +479,171 @@ TEST(ExecutionTest_Aggregate) {
     std::remove("./test_data/agg_test.heap");
     StorageManager sm("./test_data");
     auto catalog = Catalog::create();
-    QueryExecutor exec(*catalog, sm);
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
 
     exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE agg_test (cat TEXT, val INT)")).parse_statement());
     exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO agg_test VALUES ('A', 10), ('A', 20), ('B', 5)")).parse_statement());
 
-    auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT cat, COUNT(val), SUM(val) FROM agg_test GROUP BY cat")).parse_statement());
-    EXPECT_EQ(res.row_count(), 2);
-    /* Groups: 'A' (count 2, sum 30), 'B' (count 1, sum 5) */
-    /* Due to std::map implementation in AggregateOperator, they will be sorted by key 'A|', 'B|' */
-    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "2"); /* count for A */
-    EXPECT_STREQ(res.rows()[0].get(1).to_string().c_str(), "30.0"); /* sum for A */
+    auto lex = std::make_unique<Lexer>("SELECT cat, COUNT(val), SUM(val) FROM agg_test GROUP BY cat");
+    auto stmt = Parser(std::move(lex)).parse_statement();
+    if (!stmt) throw std::runtime_error("Parser failed for aggregate query");
+
+    auto res = exec.execute(*stmt);
+    if (!res.success()) throw std::runtime_error("Execution failed: " + res.error());
+
+    EXPECT_EQ(res.row_count(), static_cast<size_t>(2));
+    /* Row 0: 'A', 2, 30 */
+    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "A");
+    EXPECT_STREQ(res.rows()[0].get(1).to_string().c_str(), "2");
+    EXPECT_STREQ(res.rows()[0].get(2).to_string().c_str(), "30");
+}
+
+TEST(ExecutionTest_AggregateAdvanced) {
+    std::remove("./test_data/adv_agg.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE adv_agg (val INT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO adv_agg VALUES (10), (20), (30)")).parse_statement());
+
+    auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT MIN(val), MAX(val), AVG(val) FROM adv_agg")).parse_statement());
+    if (!res.success()) throw std::runtime_error("Execution failed: " + res.error());
+
+    EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "10");
+    EXPECT_STREQ(res.rows()[0].get(1).to_string().c_str(), "30");
+    EXPECT_STREQ(res.rows()[0].get(2).to_string().c_str(), "20");
+}
+
+TEST(ExecutionTest_AggregateDistinct) {
+    std::remove("./test_data/dist_agg.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE dist_agg (val INT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO dist_agg VALUES (10), (10), (20), (30), (30), (30)")).parse_statement());
+
+    auto res = exec.execute(*Parser(std::make_unique<Lexer>("SELECT COUNT(DISTINCT val), SUM(DISTINCT val) FROM dist_agg")).parse_statement());
+    if (!res.success()) throw std::runtime_error("Execution failed: " + res.error());
+
+    EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res.rows()[0].get(0).to_string().c_str(), "3");
+    EXPECT_STREQ(res.rows()[0].get(1).to_string().c_str(), "60");
+}
+
+TEST(ExecutionTest_Transaction) {
+    std::remove("./test_data/txn_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    
+    QueryExecutor exec1(*catalog, sm, lm, tm);
+    exec1.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE txn_test (id INT, val INT)")).parse_statement());
+    
+    exec1.execute(*Parser(std::make_unique<Lexer>("BEGIN")).parse_statement());
+    exec1.execute(*Parser(std::make_unique<Lexer>("INSERT INTO txn_test VALUES (1, 100)")).parse_statement());
+    
+    QueryExecutor exec2(*catalog, sm, lm, tm);
+    
+    auto res_commit = exec1.execute(*Parser(std::make_unique<Lexer>("COMMIT")).parse_statement());
+    EXPECT_TRUE(res_commit.success());
+    
+    auto res_select = exec2.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM txn_test WHERE id = 1")).parse_statement());
+    EXPECT_EQ(res_select.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res_select.rows()[0].get(0).to_string().c_str(), "100");
+}
+
+TEST(ExecutionTest_Rollback) {
+    std::remove("./test_data/rollback_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE rollback_test (val INT)")).parse_statement());
+    
+    exec.execute(*Parser(std::make_unique<Lexer>("BEGIN")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO rollback_test VALUES (100)")).parse_statement());
+    
+    auto res_internal = exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM rollback_test")).parse_statement());
+    EXPECT_EQ(res_internal.row_count(), static_cast<size_t>(1));
+
+    exec.execute(*Parser(std::make_unique<Lexer>("ROLLBACK")).parse_statement());
+    
+    auto res_after = exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM rollback_test")).parse_statement());
+    EXPECT_EQ(res_after.row_count(), static_cast<size_t>(0));
+}
+
+TEST(ExecutionTest_UpdateDelete) {
+    std::remove("./test_data/upd_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    QueryExecutor exec(*catalog, sm, lm, tm);
+
+    exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE upd_test (id INT, val TEXT)")).parse_statement());
+    exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO upd_test VALUES (1, 'old'), (2, 'stay')")).parse_statement());
+
+    /* Test UPDATE */
+    auto res_upd = exec.execute(*Parser(std::make_unique<Lexer>("UPDATE upd_test SET val = 'new' WHERE id = 1")).parse_statement());
+    EXPECT_EQ(res_upd.rows_affected(), static_cast<uint64_t>(1));
+
+    auto res_sel = exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM upd_test WHERE id = 1")).parse_statement());
+    EXPECT_EQ(res_sel.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res_sel.rows()[0].get(0).to_string().c_str(), "new");
+
+    /* Test DELETE */
+    auto res_del = exec.execute(*Parser(std::make_unique<Lexer>("DELETE FROM upd_test WHERE id = 2")).parse_statement());
+    EXPECT_EQ(res_del.rows_affected(), static_cast<uint64_t>(1));
+
+    auto res_sel2 = exec.execute(*Parser(std::make_unique<Lexer>("SELECT id FROM upd_test")).parse_statement());
+    EXPECT_EQ(res_sel2.row_count(), static_cast<size_t>(1)); // Only ID 1 remains
+}
+
+TEST(ExecutionTest_MVCC) {
+    std::remove("./test_data/mvcc_test.heap");
+    StorageManager sm("./test_data");
+    auto catalog = Catalog::create();
+    LockManager lm;
+    TransactionManager tm(lm, *catalog, sm);
+    
+    QueryExecutor exec1(*catalog, sm, lm, tm);
+    exec1.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE mvcc_test (val INT)")).parse_statement());
+    
+    /* Start T1 and Insert */
+    exec1.execute(*Parser(std::make_unique<Lexer>("BEGIN")).parse_statement());
+    exec1.execute(*Parser(std::make_unique<Lexer>("INSERT INTO mvcc_test VALUES (10)")).parse_statement());
+    
+    /* Session 2 should see nothing yet (atomic snapshot) */
+    QueryExecutor exec2(*catalog, sm, lm, tm);
+    auto res2_pre = exec2.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM mvcc_test")).parse_statement());
+    EXPECT_EQ(res2_pre.row_count(), static_cast<size_t>(0));
+
+    /* T1 updates row */
+    exec1.execute(*Parser(std::make_unique<Lexer>("UPDATE mvcc_test SET val = 20")).parse_statement());
+    
+    /* T1 sees new value */
+    auto res1 = exec1.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM mvcc_test")).parse_statement());
+    EXPECT_EQ(res1.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res1.rows()[0].get(0).to_string().c_str(), "20");
+
+    exec1.execute(*Parser(std::make_unique<Lexer>("COMMIT")).parse_statement());
+
+    /* After commit, Session 2 sees the latest value */
+    auto res2_post = exec2.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM mvcc_test")).parse_statement());
+    EXPECT_EQ(res2_post.row_count(), static_cast<size_t>(1));
+    EXPECT_STREQ(res2_post.rows()[0].get(0).to_string().c_str(), "20");
 }
 
 int main() {
@@ -305,15 +653,28 @@ int main() {
     RUN_TEST(ValueTest_Basic);
     RUN_TEST(ValueTest_TypeVariety);
     RUN_TEST(ParserTest_Expressions);
+    RUN_TEST(ExpressionTest_Complex);
     RUN_TEST(ParserTest_SelectVariants);
     RUN_TEST(ParserTest_Errors);
+    RUN_TEST(CatalogTest_FullLifecycle);
+    RUN_TEST(ConfigTest_Basic);
+    RUN_TEST(StatementTest_ToString);
+    RUN_TEST(StatementTest_Serialization);
     RUN_TEST(StorageTest_Persistence);
     RUN_TEST(StorageTest_Delete);
     RUN_TEST(IndexTest_BTreeBasic);
+    RUN_TEST(IndexTest_Scan);
     RUN_TEST(NetworkTest_Handshake);
+    RUN_TEST(NetworkTest_MultiClient);
     RUN_TEST(ExecutionTest_EndToEnd);
     RUN_TEST(ExecutionTest_Sort);
     RUN_TEST(ExecutionTest_Aggregate);
+    RUN_TEST(ExecutionTest_AggregateAdvanced);
+    RUN_TEST(ExecutionTest_AggregateDistinct);
+    RUN_TEST(ExecutionTest_Transaction);
+    RUN_TEST(ExecutionTest_Rollback);
+    RUN_TEST(ExecutionTest_UpdateDelete);
+    RUN_TEST(ExecutionTest_MVCC);
     
     std::cout << std::endl << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;

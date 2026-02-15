@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Enable AddressSanitizer
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+endif()
+
 # Enable compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
@@ -18,6 +25,15 @@ endif()
 # Build options
 option(BUILD_TESTS "Build tests" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(BUILD_COVERAGE "Build with coverage instrumentation" OFF)
+
+if(BUILD_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
+    endif()
+endif()
 
 # Source directories
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -80,4 +96,5 @@ message(STATUS "  Version: ${PROJECT_VERSION}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "  Build Tests: ${BUILD_TESTS}")
+message(STATUS "  Sanitizers: AddressSanitizer enabled")
 message(STATUS "=============================================")
