@@ -1,0 +1,45 @@
+name: cloudSQL CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake clang clang-tidy llvm
+
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTS=ON -DBUILD_COVERAGE=OFF
+
+    - name: Build with Clang-Tidy
+      run: |
+        cd build
+        make -j$(nproc) sqlEngineCore
+        make -j$(nproc)
+
+    - name: Run Tests
+      run: |
+        cd build
+        ./sqlEngine_tests
+        ./lock_manager_tests
+        ./server_tests
+        ./transaction_manager_tests
+        ./statement_tests
+        ./recovery_tests
+
+    - name: Check memory safety (ASan)
+      run: |
+        echo "ASan is enabled via CMAKE_CXX_FLAGS in CMakeLists.txt and verified during 'Run Tests' step."

@@ -25,7 +25,7 @@ endif()
 # Clang-Tidy integration
 find_program(CLANG_TIDY_BIN 
     NAMES clang-tidy
-    PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin
+    PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin /usr/bin /usr/local/bin
 )
 
 if(CLANG_TIDY_BIN)
