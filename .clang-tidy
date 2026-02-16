@@ -5,10 +5,17 @@ Checks: 'clang-diagnostic-*,
          modernize-*,
          performance-*,
          readability-*,
+         cppcoreguidelines-*,
+         hicpp-*,
+         misc-*,
          -modernize-use-trailing-return-type,
          -readability-braces-around-statements,
          -readability-implicit-bool-conversion,
-         -readability-redundant-declaration'
+         -readability-redundant-declaration,
+         -cppcoreguidelines-pro-type-vararg,
+         -cppcoreguidelines-pro-type-member-init,
+         -hicpp-no-assembler,
+         -hicpp-vararg'
 WarningsAsErrors: ''
 HeaderFilterRegex: 'include/.*'
 AnalyzeTemporaryDtors: false
