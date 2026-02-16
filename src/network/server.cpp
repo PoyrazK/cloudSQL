@@ -123,6 +123,15 @@ bool Server::stop() {
         accept_thread_.join();
     }
 
+    /* Join all connection worker threads */
+    std::lock_guard<std::mutex> lock(thread_mutex_);
+    for (auto& t : worker_threads_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    worker_threads_.clear();
+
     status_ = ServerStatus::Stopped;
     return true;
 }
@@ -158,10 +167,11 @@ void Server::accept_connections() {
         stats_.connections_accepted.fetch_add(1);
         stats_.connections_active.fetch_add(1);
 
-        std::thread([this, client_fd]() {
+        std::lock_guard<std::mutex> lock(thread_mutex_);
+        worker_threads_.emplace_back([this, client_fd]() {
             handle_connection(client_fd);
             stats_.connections_active.fetch_sub(1);
-        }).detach();
+        });
     }
 }
 

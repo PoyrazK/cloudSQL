@@ -85,6 +85,36 @@ TEST(LogRecordSerialization) {
     EXPECT_TRUE(deserialized.tuple_.get(1).as_text() == "test_string");
 }
 
+TEST(LogRecordAllTypes) {
+    std::vector<Value> values;
+    values.push_back(Value::make_bool(true));
+    values.push_back(Value(static_cast<int8_t>(10)));
+    values.push_back(Value(static_cast<int16_t>(200)));
+    values.push_back(Value(static_cast<int32_t>(3000)));
+    values.push_back(Value(static_cast<float>(1.23f)));
+    values.push_back(Value(static_cast<double>(4.56)));
+    values.push_back(Value::make_null());
+    
+    Tuple tuple(std::move(values));
+    LogRecord original(50, 49, LogRecordType::INSERT, "types_table", 
+                       HeapTable::TupleId(1, 1), tuple);
+    original.size_ = original.get_size();
+    
+    std::vector<char> buffer(original.size_);
+    original.serialize(buffer.data());
+    
+    LogRecord deserialized = LogRecord::deserialize(buffer.data());
+    
+    EXPECT_EQ(deserialized.tuple_.size(), 7);
+    EXPECT_TRUE(deserialized.tuple_.get(0).as_bool());
+    EXPECT_EQ(deserialized.tuple_.get(1).as_int8(), 10);
+    EXPECT_EQ(deserialized.tuple_.get(2).as_int16(), 200);
+    EXPECT_EQ(deserialized.tuple_.get(3).as_int32(), 3000);
+    EXPECT_TRUE(deserialized.tuple_.get(4).as_float32() > 1.22f && deserialized.tuple_.get(4).as_float32() < 1.24f);
+    EXPECT_TRUE(deserialized.tuple_.get(5).as_float64() > 4.55 && deserialized.tuple_.get(5).as_float64() < 4.57);
+    EXPECT_TRUE(deserialized.tuple_.get(6).is_null());
+}
+
 TEST(LogManagerBasic) {
     std::string log_file = "test_log_basic.log";
     cleanup(log_file);
@@ -119,6 +149,7 @@ int main() {
     std::cout << "============================" << std::endl;
     
     RUN_TEST(LogRecordSerialization);
+    RUN_TEST(LogRecordAllTypes);
     RUN_TEST(LogManagerBasic);
     
     std::cout << std::endl << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;

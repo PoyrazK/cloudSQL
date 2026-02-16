@@ -113,6 +113,8 @@ private:
     
     ServerStats stats_;
     std::thread accept_thread_;
+    std::vector<std::thread> worker_threads_;
+    std::mutex thread_mutex_;
 };
 
 } // namespace network

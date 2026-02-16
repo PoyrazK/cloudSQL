@@ -120,6 +120,11 @@ std::unique_ptr<Expression> ColumnExpr::clone() const {
         : std::make_unique<ColumnExpr>(name_);
 }
 
+common::Value ConstantExpr::evaluate(const executor::Tuple* tuple, const executor::Schema* schema) const {
+    (void)tuple; (void)schema;
+    return value_;
+}
+
 std::string ConstantExpr::to_string() const {
     if (value_.type() == common::TYPE_TEXT) {
         return "'" + value_.to_string() + "'";

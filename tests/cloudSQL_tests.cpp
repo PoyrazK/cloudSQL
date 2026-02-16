@@ -772,6 +772,23 @@ TEST(ExecutionTest_Expressions) {
     }
 }
 
+TEST(ExpressionTest_Types) {
+    /* Test ConstantExpr with various types for coverage */
+    {
+        ConstantExpr c_bool(Value::make_bool(true));
+        EXPECT_TRUE(c_bool.evaluate().as_bool());
+
+        ConstantExpr c_int(Value::make_int64(123));
+        EXPECT_EQ(c_int.evaluate().to_int64(), 123);
+
+        ConstantExpr c_float(Value::make_float64(1.5));
+        EXPECT_DOUBLE_EQ(c_float.evaluate().to_float64(), 1.5);
+
+        ConstantExpr c_null(Value::make_null());
+        EXPECT_TRUE(c_null.evaluate().is_null());
+    }
+}
+
 TEST(CatalogTest_Errors) {
     auto catalog = Catalog::create();
     std::vector<ColumnInfo> cols = {{"id", TYPE_INT64, 0}};
@@ -797,6 +814,19 @@ TEST(CatalogTest_Errors) {
     /* Missing index */
     EXPECT_FALSE(catalog->get_index(8888).has_value());
     EXPECT_FALSE(catalog->drop_index(8888));
+}
+
+TEST(CatalogTest_Stats) {
+    auto catalog = Catalog::create();
+    std::vector<ColumnInfo> cols = {{"id", TYPE_INT64, 0}};
+    oid_t tid = catalog->create_table("stats_test", cols);
+    
+    EXPECT_TRUE(catalog->update_table_stats(tid, 500));
+    auto tinfo = catalog->get_table(tid);
+    EXPECT_EQ((*tinfo)->num_rows, static_cast<uint64_t>(500));
+    
+    /* Cover print() */
+    catalog->print();
 }
 
 int main() {
@@ -833,6 +863,8 @@ int main() {
     RUN_TEST(ExecutionTest_Join);
     RUN_TEST(ExecutionTest_DDL);
     RUN_TEST(ExecutionTest_Expressions);
+    RUN_TEST(ExpressionTest_Types);
+    RUN_TEST(CatalogTest_Stats);
     
     std::cout << std::endl << "========================" << std::endl;
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed" << std::endl;

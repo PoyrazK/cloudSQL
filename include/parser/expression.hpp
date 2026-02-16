@@ -129,10 +129,7 @@ public:
     const common::Value& value() const { return value_; }
     
     common::Value evaluate(const executor::Tuple* tuple = nullptr, 
-                           const executor::Schema* schema = nullptr) const override { 
-        (void)tuple; (void)schema;
-        return value_; 
-    }
+                           const executor::Schema* schema = nullptr) const override;
     std::string to_string() const override;
     std::unique_ptr<Expression> clone() const override;
 };
