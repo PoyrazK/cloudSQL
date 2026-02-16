@@ -12,6 +12,7 @@
 #include "catalog/catalog.hpp"
 #include "storage/storage_manager.hpp"
 #include "transaction/transaction_manager.hpp"
+#include "recovery/log_manager.hpp"
 
 namespace cloudsql {
 namespace executor {
@@ -24,7 +25,8 @@ public:
     QueryExecutor(Catalog& catalog, 
                   storage::StorageManager& storage_manager,
                   transaction::LockManager& lock_manager,
-                  transaction::TransactionManager& transaction_manager);
+                  transaction::TransactionManager& transaction_manager,
+                  recovery::LogManager* log_manager = nullptr);
     ~QueryExecutor() = default;
 
     /**
@@ -37,6 +39,7 @@ private:
     storage::StorageManager& storage_manager_;
     transaction::LockManager& lock_manager_;
     transaction::TransactionManager& transaction_manager_;
+    recovery::LogManager* log_manager_;
     transaction::Transaction* current_txn_ = nullptr;
 
     QueryResult execute_select(const parser::SelectStatement& stmt, transaction::Transaction* txn);

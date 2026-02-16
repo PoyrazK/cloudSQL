@@ -14,8 +14,11 @@ namespace executor {
 QueryExecutor::QueryExecutor(Catalog& catalog, 
                              storage::StorageManager& storage_manager,
                              transaction::LockManager& lock_manager,
-                             transaction::TransactionManager& transaction_manager)
-    : catalog_(catalog), storage_manager_(storage_manager), lock_manager_(lock_manager), transaction_manager_(transaction_manager) {}
+                             transaction::TransactionManager& transaction_manager,
+                             recovery::LogManager* log_manager)
+    : catalog_(catalog), storage_manager_(storage_manager), 
+      lock_manager_(lock_manager), transaction_manager_(transaction_manager),
+      log_manager_(log_manager) {}
 
 QueryResult QueryExecutor::execute(const parser::Statement& stmt) {
     auto start = std::chrono::high_resolution_clock::now();
@@ -206,7 +209,17 @@ QueryResult QueryExecutor::execute_insert(const parser::InsertStatement& stmt, t
             values.push_back(expr->evaluate());
         }
         
-        auto tid = table.insert(Tuple(std::move(values)), xmin);
+        Tuple tuple(std::move(values));
+        auto tid = table.insert(tuple, xmin);
+        
+        /* Log INSERT */
+        if (log_manager_ && txn) {
+            recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(), 
+                                    recovery::LogRecordType::INSERT, 
+                                    table_name, tid, tuple);
+            auto lsn = log_manager_->append_log_record(log);
+            txn->set_prev_lsn(lsn);
+        }
         
         /* Record undo log and Acquire Exclusive Lock if in transaction */
         if (txn) {
@@ -258,7 +271,22 @@ QueryResult QueryExecutor::execute_delete(const parser::DeleteStatement& stmt, t
 
     /* Phase 2: Apply Deletions */
     for (const auto& rid : target_rids) {
+        /* Retrieve old tuple for logging */
+        Tuple old_tuple;
+        if (log_manager_ && txn) {
+            table.get(rid, old_tuple);
+        }
+
         if (table.remove(rid, xmax)) {
+            /* Log DELETE */
+            if (log_manager_ && txn) {
+                recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(), 
+                                        recovery::LogRecordType::MARK_DELETE, 
+                                        table_name, rid, old_tuple);
+                auto lsn = log_manager_->append_log_record(log);
+                txn->set_prev_lsn(lsn);
+            }
+
             if (txn) {
                 txn->add_undo_log(transaction::UndoLog::Type::DELETE, table_name, rid);
             }
@@ -319,8 +347,33 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt, t
 
     /* Phase 2: Apply Updates */
     for (const auto& op : updates) {
+        /* Retrieve old tuple for logging */
+        Tuple old_tuple;
+        if (log_manager_ && txn) {
+            table.get(op.rid, old_tuple);
+        }
+
         if (table.remove(op.rid, txn_id)) {
+            /* Log DELETE part of update */
+            if (log_manager_ && txn) {
+                recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(), 
+                                        recovery::LogRecordType::MARK_DELETE, 
+                                        table_name, op.rid, old_tuple);
+                auto lsn = log_manager_->append_log_record(log);
+                txn->set_prev_lsn(lsn);
+            }
+
             auto new_tid = table.insert(op.new_tuple, txn_id);
+            
+            /* Log INSERT part of update */
+            if (log_manager_ && txn) {
+                recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(), 
+                                        recovery::LogRecordType::INSERT, 
+                                        table_name, new_tid, op.new_tuple);
+                auto lsn = log_manager_->append_log_record(log);
+                txn->set_prev_lsn(lsn);
+            }
+
             if (txn) {
                 txn->add_undo_log(transaction::UndoLog::Type::UPDATE, table_name, op.rid);
                 txn->add_undo_log(transaction::UndoLog::Type::INSERT, table_name, new_tid);
