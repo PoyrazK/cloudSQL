@@ -22,6 +22,19 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 endif()
 
+# Clang-Tidy integration
+find_program(CLANG_TIDY_BIN 
+    NAMES clang-tidy
+    PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin
+)
+
+if(CLANG_TIDY_BIN)
+    message(STATUS "Found clang-tidy: ${CLANG_TIDY_BIN}")
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_BIN}")
+else()
+    message(WARNING "clang-tidy not found")
+endif()
+
 # Build options
 option(BUILD_TESTS "Build tests" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)

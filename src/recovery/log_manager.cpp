@@ -83,6 +83,7 @@ lsn_t LogManager::append_log_record(LogRecord& log_record) {
 }
 
 void LogManager::flush(bool force) {
+    (void)force;
     std::unique_lock<std::mutex> lock(latch_);
     
     if (log_buffer_offset_ > 0) {

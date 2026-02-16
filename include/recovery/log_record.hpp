@@ -62,12 +62,12 @@ public:
     // Body (variable fields depending on type)
     // For tuple operations:
     std::string table_name_;
-    storage::HeapTable::TupleId rid_;
+    storage::HeapTable::TupleId rid_{0, 0};
     executor::Tuple tuple_;         // Inserted or New tuple
     executor::Tuple old_tuple_;     // Old tuple (for UPDATE/DELETE)
 
     // For NEW_PAGE:
-    uint32_t page_id_;
+    uint32_t page_id_ = 0;
 
     /**
      * @brief Default constructor

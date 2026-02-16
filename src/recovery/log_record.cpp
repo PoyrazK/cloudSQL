@@ -314,7 +314,6 @@ LogRecord LogRecord::deserialize(const char* buffer) {
         }
     } else if (record.type_ == LogRecordType::NEW_PAGE) {
         std::memcpy(&record.page_id_, ptr, sizeof(uint32_t));
-        ptr += sizeof(uint32_t);
     }
     
     return record;
