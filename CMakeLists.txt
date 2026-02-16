@@ -85,6 +85,10 @@ if(BUILD_TESTS)
     add_executable(statement_tests tests/statement_tests.cpp)
     target_link_libraries(statement_tests PRIVATE sqlEngineCore)
 
+    # Create recovery unit tests
+    add_executable(recovery_tests tests/recovery_tests.cpp)
+    target_link_libraries(recovery_tests PRIVATE sqlEngineCore)
+
     # Check if GoogleTest is available
     find_package(GTest QUIET)
     if(GTest_FOUND)
