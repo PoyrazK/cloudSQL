@@ -55,7 +55,7 @@ struct UndoLog {
 class Transaction {
    private:
     txn_id_t txn_id_;
-    TransactionState state_;
+    std::atomic<TransactionState> state_;
     IsolationLevel isolation_level_;
     TransactionSnapshot snapshot_;
     int32_t prev_lsn_ = -1;  // Last LSN for this transaction
@@ -73,8 +73,8 @@ class Transaction {
         : txn_id_(txn_id), state_(TransactionState::RUNNING), isolation_level_(level) {}
 
     txn_id_t get_id() const { return txn_id_; }
-    TransactionState get_state() const { return state_; }
-    void set_state(TransactionState state) { state_ = state; }
+    TransactionState get_state() const { return state_.load(); }
+    void set_state(TransactionState state) { state_.store(state); }
     IsolationLevel get_isolation_level() const { return isolation_level_; }
 
     const TransactionSnapshot& get_snapshot() const { return snapshot_; }
