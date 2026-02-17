@@ -118,7 +118,7 @@ bool Server::start() {
         status_ = ServerStatus::Running;
         running_ = true;
     }
-    
+
     std::lock_guard<std::mutex> lock(thread_mutex_);
     accept_thread_ = std::thread(&Server::accept_connections, this);
     return true;
