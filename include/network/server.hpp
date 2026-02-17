@@ -88,9 +88,10 @@ class Server {
     void wait();
 
     const ServerStats& get_stats() const { return stats_; }
-    ServerStatus get_status() const { return status_; }
+    ServerStatus get_status() const;
     uint16_t get_port() const { return port_; }
-    bool is_running() const { return running_.load(); }
+    bool is_running() const;
+    int get_listen_fd() const;
     std::string get_status_string() const;
 
    private:
@@ -99,8 +100,8 @@ class Server {
 
     uint16_t port_;
     int listen_fd_;
-    std::atomic<bool> running_{false};
-    std::atomic<ServerStatus> status_;
+    bool running_{false};
+    ServerStatus status_;
 
     Catalog& catalog_;
     storage::StorageManager& storage_manager_;
@@ -111,6 +112,7 @@ class Server {
     std::thread accept_thread_;
     std::vector<std::thread> worker_threads_;
     std::mutex thread_mutex_;
+    mutable std::mutex state_mutex_;
 };
 
 }  // namespace network

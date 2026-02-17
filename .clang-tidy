@@ -22,7 +22,9 @@ Checks: 'clang-diagnostic-*,
          -readability-function-cognitive-complexity,
          -cppcoreguidelines-avoid-const-or-ref-data-members,
          -misc-non-private-member-variables-in-classes,
-         -bugprone-easily-swappable-parameters'
+         -bugprone-easily-swappable-parameters,
+         -bugprone-unchecked-optional-access,
+         -modernize-use-default-member-init'
 WarningsAsErrors: ''
 HeaderFilterRegex: 'include/.*'
 FormatStyle: none

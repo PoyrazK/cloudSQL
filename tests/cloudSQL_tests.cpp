@@ -424,6 +424,7 @@ TEST(NetworkTest_MultiClient) {
     for (int i = 0; i < num_clients; ++i) {
         clients.emplace_back([&port, &success_count]() {
             int sock = socket(AF_INET, SOCK_STREAM, 0);
+            if (sock < 0) return;
             struct sockaddr_in addr;
             addr.sin_family = AF_INET;
             addr.sin_port = htons(port);

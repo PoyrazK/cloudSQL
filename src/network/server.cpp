@@ -24,7 +24,7 @@ namespace network {
 class ProtocolReader {
    public:
     static uint32_t read_int32(const char* buffer) {
-        uint32_t val;
+        uint32_t val = 0;
         std::memcpy(&val, buffer, 4);
         return ntohl(val);
     }
@@ -85,13 +85,16 @@ std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog,
  * @brief Start the server
  */
 bool Server::start() {
-    if (running_.load()) return false;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (running_) return false;
+    }
 
-    listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd_ < 0) return false;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return false;
 
     int opt = 1;
-    setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -99,18 +102,24 @@ bool Server::start() {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    if (bind(listen_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(listen_fd_);
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        close(fd);
         return false;
     }
 
-    if (listen(listen_fd_, 10) < 0) {
-        close(listen_fd_);
+    if (listen(fd, 10) < 0) {
+        close(fd);
         return false;
     }
 
-    status_ = ServerStatus::Running;
-    running_ = true;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        listen_fd_ = fd;
+        status_ = ServerStatus::Running;
+        running_ = true;
+    }
+    
+    std::lock_guard<std::mutex> lock(thread_mutex_);
     accept_thread_ = std::thread(&Server::accept_connections, this);
     return true;
 }
@@ -119,40 +128,69 @@ bool Server::start() {
  * @brief Stop the server
  */
 bool Server::stop() {
-    if (!running_.load()) return true;
-
-    status_ = ServerStatus::Stopping;
-    running_ = false;
-
-    shutdown(listen_fd_, SHUT_RDWR);
-    close(listen_fd_);
-    listen_fd_ = -1;
-
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
-    }
-
-    /* Join all connection worker threads */
-    std::lock_guard<std::mutex> lock(thread_mutex_);
-    for (auto& t : worker_threads_) {
-        if (t.joinable()) {
-            t.join();
+    int fd_to_close = -1;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (!running_) return true;
+        status_ = ServerStatus::Stopping;
+        running_ = false;
+        if (listen_fd_ >= 0) {
+            shutdown(listen_fd_, SHUT_RDWR);
+            fd_to_close = listen_fd_;
+            listen_fd_ = -1;
         }
     }
-    worker_threads_.clear();
 
-    status_ = ServerStatus::Stopped;
+    {
+        std::lock_guard<std::mutex> lock(thread_mutex_);
+        if (accept_thread_.joinable()) {
+            accept_thread_.join();
+        }
+
+        /* Join all connection worker threads */
+        for (auto& t : worker_threads_) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+        worker_threads_.clear();
+    }
+
+    if (fd_to_close >= 0) {
+        close(fd_to_close);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        status_ = ServerStatus::Stopped;
+    }
     return true;
 }
 
 void Server::wait() {
+    std::lock_guard<std::mutex> lock(thread_mutex_);
     if (accept_thread_.joinable()) {
         accept_thread_.join();
     }
 }
 
+bool Server::is_running() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return running_;
+}
+
+ServerStatus Server::get_status() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return status_;
+}
+
+int Server::get_listen_fd() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return listen_fd_;
+}
+
 std::string Server::get_status_string() const {
-    switch (status_) {
+    switch (get_status()) {
         case ServerStatus::Stopped:
             return "Stopped";
         case ServerStatus::Starting:
@@ -169,13 +207,16 @@ std::string Server::get_status_string() const {
 }
 
 void Server::accept_connections() {
-    while (running_.load()) {
+    while (is_running()) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
-        int client_fd = accept(listen_fd_, (struct sockaddr*)&client_addr, &client_len);
+        int fd = get_listen_fd();
+        if (fd < 0) break;
+
+        int client_fd = accept(fd, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd < 0) {
-            if (!running_.load()) break;
+            if (!is_running()) break;
             continue;
         }
 
@@ -253,7 +294,7 @@ void Server::handle_connection(int client_fd) {
     send(client_fd, ready.data(), ready.size(), 0);
 
     /* 5. Main Message Loop */
-    while (running_.load()) {
+    while (is_running()) {
         char type;
         n = recv(client_fd, &type, 1, 0);
         if (n <= 0) break;
