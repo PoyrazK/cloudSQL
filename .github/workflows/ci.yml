@@ -34,7 +34,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache lcov
+        sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache lcov || (sleep 10 && sudo apt-get update && sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache lcov)
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -77,9 +77,9 @@ jobs:
       if: matrix.sanitizer == 'address' && matrix.compiler == 'clang++'
       run: |
         cd build
-        lcov --directory . --capture --output-file coverage.info --gcov-tool "$GITHUB_WORKSPACE/.github/scripts/llvm-gcov.sh"
-        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/CMakeFiles/*' --output-file filtered_coverage.info
-        genhtml filtered_coverage.info --output-directory out_coverage
+        lcov --directory . --capture --output-file coverage.info --gcov-tool "$GITHUB_WORKSPACE/.github/scripts/llvm-gcov.sh" --ignore-errors inconsistent
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/CMakeFiles/*' --output-file filtered_coverage.info --ignore-errors inconsistent
+        genhtml filtered_coverage.info --output-directory out_coverage --ignore-errors inconsistent
 
     - name: Upload Coverage
       if: matrix.sanitizer == 'address' && matrix.compiler == 'clang++'
