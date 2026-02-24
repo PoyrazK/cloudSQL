@@ -125,8 +125,8 @@ TEST(LockManager_Deadlock) {
 }  // namespace
 
 int main() {
-    std::cout << "Lock Manager Unit Tests" << "\n";
-    std::cout << "=======================" << "\n";
+    std::cout << "Lock Manager Unit Tests\n";
+    std::cout << "=======================\n";
 
     RUN_TEST(LockManager_Shared);
     RUN_TEST(LockManager_Exclusive);
@@ -134,10 +134,6 @@ int main() {
     RUN_TEST(LockManager_Wait);
     RUN_TEST(LockManager_Deadlock);
 
-            std::cout << "
-Results: ";
-    std::cout << tests_passed << " passed, ";
-    std::cout << tests_failed << " failed
-";
+    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

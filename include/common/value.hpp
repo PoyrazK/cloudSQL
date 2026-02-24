@@ -111,9 +111,9 @@ class Value {
 };
 
 // Constructors
-inline Value::Value() : type_(ValueType::TYPE_NULL), data_(std::monostate{}) {}
+inline Value::Value() : type_(ValueType::TYPE_NULL), data_(std::monostate {}) {}
 
-inline Value::Value(ValueType type) : type_(type), data_(std::monostate{}) {
+inline Value::Value(ValueType type) : type_(type), data_(std::monostate {}) {
     if (type != ValueType::TYPE_NULL) {
         /* Initialize with default values based on type */
         switch (type) {

@@ -198,22 +198,22 @@ class Token {
     [[nodiscard]] std::string to_string() const;
 };
 
-inline Token::Token() : type_(TokenType::End), line_(0), column_(0), value_(std::monostate{}) {}
+inline Token::Token() : type_(TokenType::End), line_(0), column_(0), value_(std::monostate {}) {}
 
-inline Token::Token(TokenType type) : type_(type), line_(0), column_(0), value_(std::monostate{}) {}
+inline Token::Token(TokenType type) : type_(type), line_(0), column_(0), value_(std::monostate {}) {}
 
 inline Token::Token(TokenType type, std::string lexeme)
-    : type_(type), lexeme_(std::move(lexeme)), line_(0), column_(0), value_(std::monostate{}) {}
+    : type_(type), lexeme_(std::move(lexeme)), line_(0), column_(0), value_(std::monostate {}) {}
 
 inline Token::Token(TokenType type, const char* lexeme)
-    : type_(type), lexeme_(lexeme), line_(0), column_(0), value_(std::monostate{}) {}
+    : type_(type), lexeme_(lexeme), line_(0), column_(0), value_(std::monostate {}) {}
 
 inline Token::Token(TokenType type, std::string lexeme, uint32_t line, uint32_t column)
     : type_(type),
       lexeme_(std::move(lexeme)),
       line_(line),
       column_(column),
-      value_(std::monostate{}) {}
+      value_(std::monostate {}) {}
 
 inline Token::Token(TokenType type, bool value)
     : type_(type), lexeme_(value ? "TRUE" : "FALSE"), line_(0), column_(0), value_(value) {}
@@ -231,7 +231,7 @@ inline Token::Token(TokenType type, std::string value, bool is_string)
       column_(0),
       value_(is_string ? std::variant<std::monostate, bool, int64_t, double, std::string>(
                              std::move(value))
-                       : std::monostate{}) {}
+                       : std::monostate {}) {}
 
 inline bool Token::is_keyword() const {
     return type_ >= TokenType::Select && type_ <= TokenType::TypeBool;

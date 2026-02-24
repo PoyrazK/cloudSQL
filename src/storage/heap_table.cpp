@@ -104,7 +104,7 @@ bool HeapTable::Iterator::next_meta(TupleMeta& out_meta) {
 
 HeapTable::TupleId HeapTable::insert(const executor::Tuple& tuple, uint64_t xmin) {
     uint32_t page_num = 0;
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
 
     while (true) {
         /* Read existing page or initialize a new one */
@@ -167,7 +167,7 @@ HeapTable::TupleId HeapTable::insert(const executor::Tuple& tuple, uint64_t xmin
  * @brief Logical deletion: update xmax field in the record blob
  */
 bool HeapTable::remove(const TupleId& tuple_id, uint64_t xmax) {
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
     if (!read_page(tuple_id.page_num, buffer.data())) {
         return false;
     }
@@ -283,7 +283,7 @@ bool HeapTable::remove(const TupleId& tuple_id, uint64_t xmax) {
  * @brief Physical deletion: zero out slot offset (rollback only)
  */
 bool HeapTable::physical_remove(const TupleId& tuple_id) {
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
     if (!read_page(tuple_id.page_num, buffer.data())) {
         return false;
     }
@@ -315,7 +315,7 @@ bool HeapTable::update(const TupleId& tuple_id, const executor::Tuple& tuple, ui
 }
 
 bool HeapTable::get_meta(const TupleId& tuple_id, TupleMeta& out_meta) const {
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
     if (!read_page(tuple_id.page_num, buffer.data())) {
         return false;
     }
@@ -412,7 +412,7 @@ bool HeapTable::get(const TupleId& tuple_id, executor::Tuple& out_tuple) const {
 uint64_t HeapTable::tuple_count() const {
     uint64_t count = 0;
     uint32_t page_num = 0;
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
     while (read_page(page_num, buffer.data())) {
         PageHeader header {};
         std::memcpy(&header, buffer.data(), sizeof(PageHeader));
@@ -438,7 +438,7 @@ bool HeapTable::create() {
         return false;
     }
 
-    std::array<char, Page::PAGE_SIZE> buffer{};
+    std::array<char, Page::PAGE_SIZE> buffer {};
     std::memset(buffer.data(), 0, Page::PAGE_SIZE);
     PageHeader header {};
     header.free_space_offset =

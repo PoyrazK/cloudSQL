@@ -88,17 +88,13 @@ TEST(TransactionManager_RollbackInsert) {
 }  // namespace
 
 int main() {
-    std::cout << "Transaction Manager Unit Tests" << "\n";
-    std::cout << "==============================" << "\n";
+    std::cout << "Transaction Manager Unit Tests\n";
+    std::cout << "==============================\n";
 
     RUN_TEST(TransactionManager_Basic);
     RUN_TEST(TransactionManager_Snapshot);
     RUN_TEST(TransactionManager_RollbackInsert);
 
-            std::cout << "
-Results: ";
-    std::cout << tests_passed << " passed, ";
-    std::cout << tests_failed << " failed
-";
+    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

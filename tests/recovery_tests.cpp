@@ -148,17 +148,13 @@ TEST(LogManagerBasic) {
 }  // namespace
 
 int main() {
-    std::cout << "cloudSQL Recovery Test Suite" << "\n";
-    std::cout << "============================" << "\n";
+    std::cout << "Unit Tests\n";
+    std::cout << "==========\n";
 
     RUN_TEST(LogRecordSerialization);
     RUN_TEST(LogRecordAllTypes);
     RUN_TEST(LogManagerBasic);
 
-            std::cout << "
-Results: ";
-    std::cout << tests_passed << " passed, ";
-    std::cout << tests_failed << " failed
-";
+    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

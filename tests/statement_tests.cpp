@@ -151,8 +151,8 @@ TEST(CreateTableStatement_Complex) {
 }  // namespace
 
 int main() {
-    std::cout << "Statement Serialization Tests" << "\n";
-    std::cout << "=============================" << "\n";
+    std::cout << "Statement Serialization Tests\n";
+    std::cout << "=============================\n";
 
     RUN_TEST(SelectStatement_Complex);
     RUN_TEST(InsertStatement_MultiRow);
@@ -160,10 +160,7 @@ int main() {
     RUN_TEST(DeleteStatement_Basic);
     RUN_TEST(CreateTableStatement_Complex);
 
-            std::cout << "
-Results: ";
-    std::cout << tests_passed << " passed, ";
-    std::cout << tests_failed << " failed
-";
+    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
     return (tests_failed > 0);
 }
+
