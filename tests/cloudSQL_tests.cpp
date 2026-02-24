@@ -981,7 +981,7 @@ int main() {
     
 
     std::cout << "
-\nResults: " << tests_passed << " passed, " << tests_failed << " failed
+\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed
 ";
     return (tests_failed > 0);
 }

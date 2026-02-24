@@ -284,7 +284,7 @@ void test_Server_MultiClient() {
 
     const int NUM_CLIENTS = 5;
     std::vector<std::thread> clients;
-    std::atomic<int> success_count {0};
+    std::atomic<int> success_count{0};
 
     for (int i = 0; i < NUM_CLIENTS; ++i) {
         clients.emplace_back([port, &success_count]() {
@@ -333,6 +333,6 @@ int main() {
     RUN_TEST(test_Server_Handshake);
     RUN_TEST(test_Server_MultiClient);
 
-    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
+    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

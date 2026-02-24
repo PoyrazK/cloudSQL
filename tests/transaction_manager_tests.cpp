@@ -95,6 +95,6 @@ int main() {
     RUN_TEST(TransactionManager_Snapshot);
     RUN_TEST(TransactionManager_RollbackInsert);
 
-    std::cout << "\nResults: " << tests_passed << " passed, " << tests_failed << " failed\n";
+    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
     return (tests_failed > 0);
 }
