@@ -1,6 +1,6 @@
 #include "network/server.hpp"
 #include "catalog/catalog.hpp"
-#include "storage/storage_manager.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
 #include "executor/types.hpp"
 #include "common/value.hpp"
@@ -51,7 +51,8 @@ constexpr uint32_t Q_LEN_BASE = 5;
 
 void test_Server_StatusStrings() {
     auto catalog = std::make_unique<Catalog>();
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     Server s(PORT_STATUS, *catalog, sm);
     
     EXPECT_EQ(s.get_status_string(), std::string("Stopped"));
@@ -63,7 +64,8 @@ void test_Server_StatusStrings() {
 
 void test_Server_SimpleQuery() {
     auto catalog = std::make_unique<Catalog>();
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     const uint16_t port = PORT_SIMPLE;
     
     /* Register table in catalog */
@@ -155,7 +157,8 @@ void test_Server_SimpleQuery() {
 
 void test_Server_InvalidProtocol() {
     auto catalog = std::make_unique<Catalog>();
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     const uint16_t port = PORT_INVALID;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
@@ -182,7 +185,8 @@ void test_Server_InvalidProtocol() {
 
 void test_Server_Terminate() {
     auto catalog = std::make_unique<Catalog>();
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     const uint16_t port = PORT_TERM;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
@@ -217,7 +221,8 @@ void test_Server_Terminate() {
 
 void test_Server_Handshake() {
     const uint16_t port = PORT_HANDSHAKE;
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     auto catalog = std::make_unique<Catalog>();
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
@@ -251,7 +256,8 @@ void test_Server_Handshake() {
 
 void test_Server_MultiClient() {
     const uint16_t port = PORT_MULTI;
-    storage::StorageManager sm("./test_data");
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager sm(128, disk_manager);
     auto catalog = std::make_unique<Catalog>();
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());

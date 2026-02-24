@@ -9,7 +9,7 @@
 #include <cstdint>
 
 #include "catalog/catalog.hpp"
-#include "storage/storage_manager.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction_manager.hpp"
 #include "transaction/transaction.hpp"
@@ -31,7 +31,8 @@ using cloudsql::tests::tests_failed;
 TEST(TransactionManager_Basic) {
     LockManager lm;
     auto catalog = Catalog::create();
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     auto* const txn = tm.begin();
@@ -49,7 +50,8 @@ TEST(TransactionManager_Basic) {
 TEST(TransactionManager_AbortCleanup) {
     LockManager lm;
     auto catalog = Catalog::create();
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     auto* const txn = tm.begin();
@@ -69,7 +71,8 @@ TEST(TransactionManager_AbortCleanup) {
 TEST(TransactionManager_RollbackInsert) {
     LockManager lm;
     auto catalog = Catalog::create();
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     static_cast<void>(std::remove("./test_data/rb_insert.heap"));

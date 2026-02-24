@@ -33,7 +33,7 @@
 #include "parser/token.hpp"
 #include "storage/btree_index.hpp"
 #include "storage/heap_table.hpp"
-#include "storage/storage_manager.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction_manager.hpp"
 #include "test_utils.hpp"
@@ -265,13 +265,15 @@ TEST(StorageTest_Persistence) {
     Schema schema;
     schema.add_column("data", ValueType::TYPE_TEXT);
     {
-        StorageManager sm("./test_data");
+        StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
         HeapTable table(filename, sm, schema);
         static_cast<void>(table.create());
         static_cast<void>(table.insert(Tuple({Value::make_text("Persistent data")})));
     }
     {
-        StorageManager sm("./test_data");
+        StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
         HeapTable table(filename, sm, schema);
         auto iter = table.scan();
         Tuple t;
@@ -283,7 +285,8 @@ TEST(StorageTest_Persistence) {
 TEST(StorageTest_Delete) {
     const std::string filename = "delete_test";
     static_cast<void>(std::remove("./test_data/delete_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     Schema schema;
     schema.add_column("id", ValueType::TYPE_INT64);
     HeapTable table(filename, sm, schema);
@@ -307,7 +310,8 @@ TEST(StorageTest_Delete) {
 
 TEST(IndexTest_BTreeBasic) {
     static_cast<void>(std::remove("./test_data/idx_test.idx"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     BTreeIndex idx("idx_test", sm, ValueType::TYPE_INT64);
     static_cast<void>(idx.create());
     static_cast<void>(idx.insert(Value::make_int64(BTREE_VAL_10), HeapTable::TupleId(1, 1)));
@@ -320,7 +324,8 @@ TEST(IndexTest_BTreeBasic) {
 
 TEST(IndexTest_Scan) {
     static_cast<void>(std::remove("./test_data/scan_test.idx"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     BTreeIndex idx("scan_test", sm, ValueType::TYPE_INT64);
     static_cast<void>(idx.create());
     static_cast<void>(idx.insert(Value::make_int64(1), HeapTable::TupleId(1, 1)));
@@ -340,7 +345,8 @@ TEST(IndexTest_Scan) {
 #if 0
 TEST(NetworkTest_Handshake) {
     const uint16_t port = 5438;
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     auto server = network::Server::create(port, *catalog, sm);
 
@@ -380,7 +386,8 @@ TEST(NetworkTest_Handshake) {
 
 TEST(NetworkTest_MultiClient) {
     const uint16_t port = 5439;
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     auto server = network::Server::create(port, *catalog, sm);
 
@@ -424,7 +431,8 @@ TEST(NetworkTest_MultiClient) {
 
 TEST(ExecutionTest_EndToEnd) {
     static_cast<void>(std::remove("./test_data/users.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -454,7 +462,8 @@ TEST(ExecutionTest_EndToEnd) {
 
 TEST(ExecutionTest_Sort) {
     static_cast<void>(std::remove("./test_data/sort_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -476,7 +485,8 @@ TEST(ExecutionTest_Sort) {
 
 TEST(ExecutionTest_Aggregate) {
     static_cast<void>(std::remove("./test_data/agg_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -505,7 +515,8 @@ TEST(ExecutionTest_Aggregate) {
 
 TEST(ExecutionTest_AggregateAdvanced) {
     static_cast<void>(std::remove("./test_data/adv_agg.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -529,7 +540,8 @@ TEST(ExecutionTest_AggregateAdvanced) {
 
 TEST(ExecutionTest_AggregateDistinct) {
     static_cast<void>(std::remove("./test_data/dist_agg.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -554,7 +566,8 @@ TEST(ExecutionTest_AggregateDistinct) {
 
 TEST(ExecutionTest_Transaction) {
     static_cast<void>(std::remove("./test_data/txn_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -581,7 +594,8 @@ TEST(ExecutionTest_Transaction) {
 
 TEST(ExecutionTest_Rollback) {
     static_cast<void>(std::remove("./test_data/rollback_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -607,7 +621,8 @@ TEST(ExecutionTest_Rollback) {
 
 TEST(ExecutionTest_UpdateDelete) {
     static_cast<void>(std::remove("./test_data/upd_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -643,7 +658,8 @@ TEST(ExecutionTest_UpdateDelete) {
 
 TEST(ExecutionTest_MVCC) {
     static_cast<void>(std::remove("./test_data/mvcc_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -685,7 +701,8 @@ TEST(ExecutionTest_MVCC) {
 TEST(ExecutionTest_Join) {
     static_cast<void>(std::remove("./test_data/users.heap"));
     static_cast<void>(std::remove("./test_data/orders.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -722,7 +739,8 @@ TEST(ExecutionTest_Join) {
 
 TEST(ExecutionTest_DDL) {
     static_cast<void>(std::remove("./test_data/ddl_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
@@ -780,7 +798,8 @@ TEST(LexerTest_Advanced) {
 
 TEST(ExecutionTest_Expressions) {
     static_cast<void>(std::remove("./test_data/expr_test.heap"));
-    StorageManager sm("./test_data");
+    StorageManager disk_manager("./test_data");
+    BufferPoolManager sm(128, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
     TransactionManager tm(lm, *catalog, sm);
