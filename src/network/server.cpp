@@ -119,7 +119,7 @@ Server::Server(uint16_t port, Catalog& catalog, storage::BufferPoolManager& bpm)
     : port_(port),
       catalog_(catalog),
       bpm_(bpm),
-      transaction_manager_(lock_manager_, catalog, bpm) {}
+      transaction_manager_(lock_manager_, catalog, bpm){}
 
 std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog,
                                        storage::BufferPoolManager& bpm) {
