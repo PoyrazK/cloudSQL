@@ -3,20 +3,20 @@
  * @brief Unit tests for Transaction Manager
  */
 
+#include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <vector>
-#include <cstdint>
 
 #include "catalog/catalog.hpp"
-#include "storage/buffer_pool_manager.hpp"
-#include "transaction/lock_manager.hpp"
-#include "transaction/transaction_manager.hpp"
-#include "transaction/transaction.hpp"
-#include "storage/heap_table.hpp"
-#include "executor/types.hpp"
 #include "common/value.hpp"
+#include "executor/types.hpp"
+#include "storage/buffer_pool_manager.hpp"
+#include "storage/heap_table.hpp"
 #include "test_utils.hpp"
+#include "transaction/lock_manager.hpp"
+#include "transaction/transaction.hpp"
+#include "transaction/transaction_manager.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::transaction;
@@ -25,8 +25,8 @@ using namespace cloudsql::executor;
 
 namespace {
 
-using cloudsql::tests::tests_passed;
 using cloudsql::tests::tests_failed;
+using cloudsql::tests::tests_passed;
 
 TEST(TransactionManager_Basic) {
     LockManager lm;
@@ -76,13 +76,14 @@ TEST(TransactionManager_RollbackInsert) {
     TransactionManager tm(lm, *catalog, sm);
 
     static_cast<void>(std::remove("./test_data/rb_insert.heap"));
-    static_cast<void>(catalog->create_table("rb_insert", {{"id", common::ValueType::TYPE_INT64, 0}}));
-    HeapTable table("rb_insert", sm, Schema({ColumnMeta("id", common::ValueType::TYPE_INT64, true)}));
+    static_cast<void>(
+        catalog->create_table("rb_insert", {{"id", common::ValueType::TYPE_INT64, 0}}));
+    HeapTable table("rb_insert", sm,
+                    Schema({ColumnMeta("id", common::ValueType::TYPE_INT64, true)}));
     static_cast<void>(table.create());
 
     auto* const txn = tm.begin();
-    const auto tid = table.insert(Tuple({common::Value::make_int64(1)}),
-                            txn->get_id());
+    const auto tid = table.insert(Tuple({common::Value::make_int64(1)}), txn->get_id());
     txn->add_undo_log(UndoLog::Type::INSERT, "rb_insert", tid);
 
     EXPECT_EQ(table.tuple_count(), static_cast<uint64_t>(1));
@@ -92,7 +93,7 @@ TEST(TransactionManager_RollbackInsert) {
     EXPECT_EQ(table.tuple_count(), static_cast<uint64_t>(0));
 }
 
-} // namespace
+}  // namespace
 
 int main() {
     std::cout << "Transaction Manager Unit Tests" << "\n";

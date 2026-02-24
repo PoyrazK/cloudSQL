@@ -1,27 +1,29 @@
-#include "network/server.hpp"
-#include "catalog/catalog.hpp"
-#include "storage/buffer_pool_manager.hpp"
-#include "storage/heap_table.hpp"
-#include "executor/types.hpp"
-#include "common/value.hpp"
-#include "test_utils.hpp"
-#include <iostream>
-#include <vector>
-#include <array>
-#include <string>
-#include <thread>
-#include <chrono>
-#include <cstdint>
+#include <arpa/inet.h>  // IWYU pragma: keep
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>   // IWYU pragma: keep
-#include <unistd.h>      // IWYU pragma: keep
-#include <stdexcept>
-#include <memory>
+#include <unistd.h>  // IWYU pragma: keep
+
+#include <array>
 #include <atomic>
-#include <utility>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "catalog/catalog.hpp"
+#include "common/value.hpp"
+#include "executor/types.hpp"
+#include "network/server.hpp"
+#include "storage/buffer_pool_manager.hpp"
+#include "storage/heap_table.hpp"
+#include "test_utils.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::network;
@@ -54,7 +56,7 @@ void test_Server_StatusStrings() {
     storage::StorageManager disk_manager("./test_data");
     storage::BufferPoolManager sm(128, disk_manager);
     Server s(PORT_STATUS, *catalog, sm);
-    
+
     EXPECT_EQ(s.get_status_string(), std::string("Stopped"));
     static_cast<void>(s.start());
     EXPECT_EQ(s.get_status_string(), std::string("Running"));
@@ -67,16 +69,18 @@ void test_Server_SimpleQuery() {
     storage::StorageManager disk_manager("./test_data");
     storage::BufferPoolManager sm(128, disk_manager);
     const uint16_t port = PORT_SIMPLE;
-    
+
     /* Register table in catalog */
     std::vector<ColumnInfo> cols;
     cols.emplace_back("id", common::ValueType::TYPE_INT32, 0);
     static_cast<void>(catalog->create_table("dual", std::move(cols)));
 
     auto server = Server::create(port, *catalog, sm);
-    
+
     static_cast<void>(std::remove("./test_data/dual.heap"));
-    storage::HeapTable table("dual", sm, executor::Schema({executor::ColumnMeta("id", common::ValueType::TYPE_INT32, true)}));
+    storage::HeapTable table(
+        "dual", sm,
+        executor::Schema({executor::ColumnMeta("id", common::ValueType::TYPE_INT32, true)}));
     static_cast<void>(table.create());
     static_cast<void>(table.insert(executor::Tuple({common::Value(1)}), 0));
 
@@ -91,7 +95,8 @@ void test_Server_SimpleQuery() {
     for (int i = 0; i < CONN_RETRIES; ++i) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock >= 0) {
-            if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+                0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                 break;
             }
             static_cast<void>(close(sock));
@@ -101,12 +106,13 @@ void test_Server_SimpleQuery() {
     }
 
     if (sock >= 0) {
-        const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
+        const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                                                 htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
         static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
-        
+
         std::array<char, BUF_SIZE> buffer{};
         static_cast<void>(recv(sock, buffer.data(), AUTH_OK_LEN, 0));  // AuthOK
-        static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));  // ReadyForQuery
+        static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));    // ReadyForQuery
 
         const std::string sql = "SELECT id FROM dual";
         const char q_type = 'Q';
@@ -118,7 +124,7 @@ void test_Server_SimpleQuery() {
         const ssize_t n_t = recv(sock, buffer.data(), 1, 0);
         EXPECT_GT(n_t, 0);
         EXPECT_EQ(buffer[0], 'T');
-        
+
         uint32_t res_len = 0;
         static_cast<void>(recv(sock, &res_len, 4, 0));
         res_len = ntohl(res_len);
@@ -128,7 +134,7 @@ void test_Server_SimpleQuery() {
         const ssize_t n_d = recv(sock, buffer.data(), 1, 0);
         EXPECT_GT(n_d, 0);
         EXPECT_EQ(buffer[0], 'D');
-        
+
         static_cast<void>(recv(sock, &res_len, 4, 0));
         res_len = ntohl(res_len);
         body.resize(res_len - 4);
@@ -137,7 +143,7 @@ void test_Server_SimpleQuery() {
         const ssize_t n_c = recv(sock, buffer.data(), 1, 0);
         EXPECT_GT(n_c, 0);
         EXPECT_EQ(buffer[0], 'C');
-        
+
         static_cast<void>(recv(sock, &res_len, 4, 0));
         res_len = ntohl(res_len);
         body.resize(res_len - 4);
@@ -146,7 +152,7 @@ void test_Server_SimpleQuery() {
         const ssize_t n_z = recv(sock, buffer.data(), 1, 0);
         EXPECT_GT(n_z, 0);
         EXPECT_EQ(buffer[0], 'Z');
-        
+
         static_cast<void>(close(sock));
     } else {
         throw std::runtime_error("Failed to connect to server");
@@ -170,10 +176,12 @@ void test_Server_InvalidProtocol() {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(12345)};
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                                                     htonl(12345)};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
-            
+
             std::array<char, 1> buffer{};
             const ssize_t n = recv(sock, buffer.data(), 1, 0);
             EXPECT_EQ(n, 0);
@@ -198,19 +206,21 @@ void test_Server_Terminate() {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                                                     htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
-            
+
             std::array<char, BUF_SIZE> buffer{};
             static_cast<void>(recv(sock, buffer.data(), AUTH_OK_LEN, 0));  // AuthOK
-            static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));  // ReadyForQuery
+            static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));    // ReadyForQuery
 
             const char terminate = 'X';
             const uint32_t len = htonl(4);
             static_cast<void>(send(sock, &terminate, 1, 0));
             static_cast<void>(send(sock, &len, 4, 0));
-            
+
             const ssize_t n = recv(sock, buffer.data(), 1, 0);
             EXPECT_EQ(n, 0);
         }
@@ -234,16 +244,19 @@ void test_Server_Handshake() {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             // 1. SSL Request
-            const std::array<uint32_t, 2> ssl_req = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(static_cast<uint32_t>(PG_SSL_CODE))};
+            const std::array<uint32_t, 2> ssl_req = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                                                     htonl(static_cast<uint32_t>(PG_SSL_CODE))};
             static_cast<void>(send(sock, ssl_req.data(), STARTUP_PKT_LEN, 0));
             char response{};
             static_cast<void>(recv(sock, &response, 1, 0));
             EXPECT_EQ(static_cast<int>(response), static_cast<int>('N'));
 
             // 2. Startup
-            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
+            const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                                                     htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
             char type{};
             static_cast<void>(recv(sock, &type, 1, 0));
@@ -275,8 +288,12 @@ void test_Server_MultiClient() {
 
             const int sock = socket(AF_INET, SOCK_STREAM, 0);
             if (sock >= 0) {
-                if (connect(sock, reinterpret_cast<struct sockaddr*>(&client_addr), sizeof(client_addr)) == 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)), htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
+                if (connect(sock, reinterpret_cast<struct sockaddr*>(&client_addr),
+                            sizeof(client_addr)) ==
+                    0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    const std::array<uint32_t, 2> startup = {
+                        htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
+                        htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
                     static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
                     char type{};
                     if (recv(sock, &type, 1, 0) > 0 && type == 'R') {
@@ -288,13 +305,15 @@ void test_Server_MultiClient() {
         });
     }
 
-    for (auto& t : clients) { t.join(); }
+    for (auto& t : clients) {
+        t.join();
+    }
     EXPECT_EQ(success_count.load(), NUM_CLIENTS);
 
     static_cast<void>(server->stop());
 }
 
-} // namespace
+}  // namespace
 
 int main() {
     std::cout << "Server Unit Tests\n";

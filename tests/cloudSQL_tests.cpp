@@ -12,31 +12,31 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
-#include <exception>
 
 #include "catalog/catalog.hpp"
 #include "common/config.hpp"
 #include "common/value.hpp"
 #include "executor/query_executor.hpp"
 #include "executor/types.hpp"
-#include "network/server.hpp" // IWYU pragma: keep
+#include "network/server.hpp"  // IWYU pragma: keep
 #include "parser/expression.hpp"
 #include "parser/lexer.hpp"
 #include "parser/parser.hpp"
 #include "parser/statement.hpp"
 #include "parser/token.hpp"
 #include "storage/btree_index.hpp"
-#include "storage/heap_table.hpp"
 #include "storage/buffer_pool_manager.hpp"
+#include "storage/heap_table.hpp"
+#include "test_utils.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction_manager.hpp"
-#include "test_utils.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::common;
@@ -48,8 +48,8 @@ using namespace cloudsql::transaction;
 namespace {
 
 // Using common test counters
-using cloudsql::tests::tests_passed;
 using cloudsql::tests::tests_failed;
+using cloudsql::tests::tests_passed;
 
 constexpr int64_t VAL_42 = 42;
 constexpr double PI_LOWER = 3.14;
@@ -107,7 +107,9 @@ TEST(ExpressionTest_Complex) {
         auto lexer = std::make_unique<Lexer>("SELECT (1 > 0 AND 5 <= 2) OR NOT (1 = 1) FROM dual");
         Parser parser(std::move(lexer));
         auto stmt = parser.parse_statement();
-        if (!stmt) { throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 1"); }
+        if (!stmt) {
+            throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 1");
+        }
         const auto* const select = dynamic_cast<const SelectStatement*>(stmt.get());
         const auto val = select->columns()[0]->evaluate();
         EXPECT_FALSE(val.as_bool());
@@ -116,7 +118,9 @@ TEST(ExpressionTest_Complex) {
         auto lexer = std::make_unique<Lexer>("SELECT -10 + 20, 5 * (2 + 3) FROM dual");
         Parser parser(std::move(lexer));
         auto stmt = parser.parse_statement();
-        if (!stmt) { throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 2"); }
+        if (!stmt) {
+            throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 2");
+        }
         const auto* const select = dynamic_cast<const SelectStatement*>(stmt.get());
         EXPECT_EQ(select->columns()[0]->evaluate().to_int64(), VAL_10);
         EXPECT_EQ(select->columns()[1]->evaluate().to_int64(), VAL_25);
@@ -125,17 +129,25 @@ TEST(ExpressionTest_Complex) {
         auto lexer = std::make_unique<Lexer>("SELECT 5.5 FROM dual");
         Parser parser(std::move(lexer));
         auto stmt = parser.parse_statement();
-        if (!stmt) { throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3a"); }
+        if (!stmt) {
+            throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3a");
+        }
         const auto* const select = dynamic_cast<const SelectStatement*>(stmt.get());
-        EXPECT_TRUE(select->columns()[0]->evaluate().to_float64() == 5.5); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_TRUE(
+            select->columns()[0]->evaluate().to_float64() ==
+            5.5);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     }
     {
         auto lexer = std::make_unique<Lexer>("SELECT 10 / 2 FROM dual");
         Parser parser(std::move(lexer));
         auto stmt = parser.parse_statement();
-        if (!stmt) { throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3b"); }
+        if (!stmt) {
+            throw std::runtime_error("ExpressionTest_Complex: Parser failed on query 3b");
+        }
         const auto* const select = dynamic_cast<const SelectStatement*>(stmt.get());
-        EXPECT_TRUE(select->columns()[0]->evaluate().to_float64() == 5.0); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_TRUE(
+            select->columns()[0]->evaluate().to_float64() ==
+            5.0);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     }
 }
 
@@ -147,7 +159,10 @@ TEST(ParserTest_SelectVariants) {
         const auto* const select = dynamic_cast<const SelectStatement*>(stmt.get());
         EXPECT_TRUE(select->distinct());
         EXPECT_EQ(select->limit(), VAL_10);
-        EXPECT_EQ(select->offset(), static_cast<int64_t>(20)); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_EQ(
+            select->offset(),
+            static_cast<int64_t>(
+                20));  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     }
     {
         auto lexer =
@@ -174,7 +189,8 @@ TEST(ParserTest_Errors) {
 TEST(CatalogTest_FullLifecycle) {
     auto catalog = Catalog::create();
 
-    const std::vector<ColumnInfo> cols = {{"id", ValueType::TYPE_INT64, 0}, {"name", ValueType::TYPE_TEXT, 1}};
+    const std::vector<ColumnInfo> cols = {{"id", ValueType::TYPE_INT64, 0},
+                                          {"name", ValueType::TYPE_TEXT, 1}};
 
     const oid_t table_id = catalog->create_table("test_table", cols);
     EXPECT_TRUE(table_id > 0);
@@ -266,14 +282,14 @@ TEST(StorageTest_Persistence) {
     schema.add_column("data", ValueType::TYPE_TEXT);
     {
         StorageManager disk_manager("./test_data");
-    BufferPoolManager sm(128, disk_manager);
+        BufferPoolManager sm(128, disk_manager);
         HeapTable table(filename, sm, schema);
         static_cast<void>(table.create());
         static_cast<void>(table.insert(Tuple({Value::make_text("Persistent data")})));
     }
     {
         StorageManager disk_manager("./test_data");
-    BufferPoolManager sm(128, disk_manager);
+        BufferPoolManager sm(128, disk_manager);
         HeapTable table(filename, sm, schema);
         auto iter = table.scan();
         Tuple t;
@@ -442,20 +458,26 @@ TEST(ExecutionTest_EndToEnd) {
         auto lexer = std::make_unique<Lexer>("CREATE TABLE users (id BIGINT, age BIGINT)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
         const auto res = exec.execute(*stmt);
-        if (!res.success()) { throw std::runtime_error("CREATE failed: " + res.error()); }
+        if (!res.success()) {
+            throw std::runtime_error("CREATE failed: " + res.error());
+        }
     }
     {
         auto lexer =
             std::make_unique<Lexer>("INSERT INTO users (id, age) VALUES (1, 20), (2, 30), (3, 40)");
         auto stmt = Parser(std::move(lexer)).parse_statement();
         const auto res = exec.execute(*stmt);
-        if (!res.success()) { throw std::runtime_error("INSERT failed: " + res.error()); }
+        if (!res.success()) {
+            throw std::runtime_error("INSERT failed: " + res.error());
+        }
     }
     {
         auto lexer = std::make_unique<Lexer>("SELECT id FROM users WHERE age > 25");
         auto stmt = Parser(std::move(lexer)).parse_statement();
         const auto res = exec.execute(*stmt);
-        if (!res.success()) { throw std::runtime_error("SELECT failed: " + res.error()); }
+        if (!res.success()) {
+            throw std::runtime_error("SELECT failed: " + res.error());
+        }
         EXPECT_EQ(res.row_count(), static_cast<size_t>(2));
     }
 }
@@ -471,8 +493,9 @@ TEST(ExecutionTest_Sort) {
 
     static_cast<void>(exec.execute(
         *Parser(std::make_unique<Lexer>("CREATE TABLE sort_test (val INT)")).parse_statement()));
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO sort_test VALUES (30), (10), (20)"))
-                      .parse_statement()));
+    static_cast<void>(exec.execute(
+        *Parser(std::make_unique<Lexer>("INSERT INTO sort_test VALUES (30), (10), (20)"))
+             .parse_statement()));
 
     const auto res =
         exec.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM sort_test ORDER BY val"))
@@ -492,19 +515,25 @@ TEST(ExecutionTest_Aggregate) {
     TransactionManager tm(lm, *catalog, sm);
     QueryExecutor exec(*catalog, sm, lm, tm);
 
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE agg_test (cat TEXT, val INT)"))
-                      .parse_statement()));
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>(
-                             "INSERT INTO agg_test VALUES ('A', 10), ('A', 20), ('B', 5)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE agg_test (cat TEXT, val INT)"))
+                          .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>(
+                                 "INSERT INTO agg_test VALUES ('A', 10), ('A', 20), ('B', 5)"))
+                          .parse_statement()));
 
     auto lex =
         std::make_unique<Lexer>("SELECT cat, COUNT(val), SUM(val) FROM agg_test GROUP BY cat");
     auto stmt = Parser(std::move(lex)).parse_statement();
-    if (!stmt) { throw std::runtime_error("Parser failed for aggregate query"); }
+    if (!stmt) {
+        throw std::runtime_error("Parser failed for aggregate query");
+    }
 
     const auto res = exec.execute(*stmt);
-    if (!res.success()) { throw std::runtime_error("Execution failed: " + res.error()); }
+    if (!res.success()) {
+        throw std::runtime_error("Execution failed: " + res.error());
+    }
 
     EXPECT_EQ(res.row_count(), static_cast<size_t>(2));
     /* Row 0: 'A', 2, 30 */
@@ -524,13 +553,16 @@ TEST(ExecutionTest_AggregateAdvanced) {
 
     static_cast<void>(exec.execute(
         *Parser(std::make_unique<Lexer>("CREATE TABLE adv_agg (val INT)")).parse_statement()));
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO adv_agg VALUES (10), (20), (30)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO adv_agg VALUES (10), (20), (30)"))
+                          .parse_statement()));
 
     const auto res = exec.execute(
         *Parser(std::make_unique<Lexer>("SELECT MIN(val), MAX(val), AVG(val) FROM adv_agg"))
              .parse_statement());
-    if (!res.success()) { throw std::runtime_error("Execution failed: " + res.error()); }
+    if (!res.success()) {
+        throw std::runtime_error("Execution failed: " + res.error());
+    }
 
     EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
     EXPECT_STREQ(res.rows()[0].get(0).to_string(), "10");
@@ -549,15 +581,18 @@ TEST(ExecutionTest_AggregateDistinct) {
 
     static_cast<void>(exec.execute(
         *Parser(std::make_unique<Lexer>("CREATE TABLE dist_agg (val INT)")).parse_statement()));
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>(
-                             "INSERT INTO dist_agg VALUES (10), (10), (20), (30), (30), (30)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>(
+                                 "INSERT INTO dist_agg VALUES (10), (10), (20), (30), (30), (30)"))
+                          .parse_statement()));
 
     const auto res =
         exec.execute(*Parser(std::make_unique<Lexer>(
                                  "SELECT COUNT(DISTINCT val), SUM(DISTINCT val) FROM dist_agg"))
                           .parse_statement());
-    if (!res.success()) { throw std::runtime_error("Execution failed: " + res.error()); }
+    if (!res.success()) {
+        throw std::runtime_error("Execution failed: " + res.error());
+    }
 
     EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
     EXPECT_STREQ(res.rows()[0].get(0).to_string(), "3");
@@ -573,21 +608,24 @@ TEST(ExecutionTest_Transaction) {
     TransactionManager tm(lm, *catalog, sm);
 
     QueryExecutor qexec1(*catalog, sm, lm, tm);
-    static_cast<void>(qexec1.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE txn_test (id INT, val INT)"))
-                       .parse_statement()));
+    static_cast<void>(
+        qexec1.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE txn_test (id INT, val INT)"))
+                            .parse_statement()));
 
     static_cast<void>(qexec1.execute(*Parser(std::make_unique<Lexer>("BEGIN")).parse_statement()));
-    static_cast<void>(qexec1.execute(
-        *Parser(std::make_unique<Lexer>("INSERT INTO txn_test VALUES (1, 100)")).parse_statement()));
+    static_cast<void>(
+        qexec1.execute(*Parser(std::make_unique<Lexer>("INSERT INTO txn_test VALUES (1, 100)"))
+                            .parse_statement()));
 
     QueryExecutor qexec2(*catalog, sm, lm, tm);
 
-    const auto res_commit = qexec1.execute(*Parser(std::make_unique<Lexer>("COMMIT")).parse_statement());
+    const auto res_commit =
+        qexec1.execute(*Parser(std::make_unique<Lexer>("COMMIT")).parse_statement());
     EXPECT_TRUE(res_commit.success());
 
     const auto res_select =
         qexec2.execute(*Parser(std::make_unique<Lexer>("SELECT val FROM txn_test WHERE id = 1"))
-                           .parse_statement());
+                            .parse_statement());
     EXPECT_EQ(res_select.row_count(), static_cast<size_t>(1));
     EXPECT_STREQ(res_select.rows()[0].get(0).to_string(), "100");
 }
@@ -601,12 +639,14 @@ TEST(ExecutionTest_Rollback) {
     TransactionManager tm(lm, *catalog, sm);
     QueryExecutor exec(*catalog, sm, lm, tm);
 
-    static_cast<void>(exec.execute(
-        *Parser(std::make_unique<Lexer>("CREATE TABLE rollback_test (val INT)")).parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE rollback_test (val INT)"))
+                          .parse_statement()));
 
     static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("BEGIN")).parse_statement()));
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO rollback_test VALUES (100)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("INSERT INTO rollback_test VALUES (100)"))
+                          .parse_statement()));
 
     const auto res_internal = exec.execute(
         *Parser(std::make_unique<Lexer>("SELECT val FROM rollback_test")).parse_statement());
@@ -628,8 +668,9 @@ TEST(ExecutionTest_UpdateDelete) {
     TransactionManager tm(lm, *catalog, sm);
     QueryExecutor exec(*catalog, sm, lm, tm);
 
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE upd_test (id INT, val TEXT)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE upd_test (id INT, val TEXT)"))
+                          .parse_statement()));
     static_cast<void>(exec.execute(
         *Parser(std::make_unique<Lexer>("INSERT INTO upd_test VALUES (1, 'old'), (2, 'stay')"))
              .parse_statement()));
@@ -708,8 +749,9 @@ TEST(ExecutionTest_Join) {
     TransactionManager tm(lm, *catalog, sm);
     QueryExecutor exec(*catalog, sm, lm, tm);
 
-    static_cast<void>(exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE users (id INT, name TEXT)"))
-                      .parse_statement()));
+    static_cast<void>(
+        exec.execute(*Parser(std::make_unique<Lexer>("CREATE TABLE users (id INT, name TEXT)"))
+                          .parse_statement()));
     static_cast<void>(exec.execute(
         *Parser(std::make_unique<Lexer>("CREATE TABLE orders (id INT, user_id INT, amount DOUBLE)"))
              .parse_statement()));
@@ -819,7 +861,10 @@ TEST(ExecutionTest_Expressions) {
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NULL"))
                  .parse_statement());
         EXPECT_EQ(res.row_count(), static_cast<size_t>(1));
-        EXPECT_EQ(res.rows()[0].get(0).to_int64(), static_cast<int64_t>(2)); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_EQ(
+            res.rows()[0].get(0).to_int64(),
+            static_cast<int64_t>(
+                2));  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
         const auto res2 = exec.execute(
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NOT NULL"))
@@ -838,7 +883,10 @@ TEST(ExecutionTest_Expressions) {
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE str NOT IN ('A', 'C')"))
                  .parse_statement());
         EXPECT_EQ(res2.row_count(), static_cast<size_t>(1));
-        EXPECT_EQ(res2.rows()[0].get(0).to_int64(), static_cast<int64_t>(2)); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_EQ(
+            res2.rows()[0].get(0).to_int64(),
+            static_cast<int64_t>(
+                2));  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     }
 
     /* 3. Test Arithmetic and Complex Binary */
@@ -847,9 +895,15 @@ TEST(ExecutionTest_Expressions) {
             *Parser(std::make_unique<Lexer>(
                         "SELECT id, val * 2 + 10, val / 2, val - 5 FROM expr_test WHERE id = 1"))
                  .parse_statement());
-        EXPECT_DOUBLE_EQ(res.rows()[0].get(1).to_float64(), 31.0); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-        EXPECT_DOUBLE_EQ(res.rows()[0].get(2).to_float64(), 5.25); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-        EXPECT_DOUBLE_EQ(res.rows()[0].get(3).to_float64(), 5.5);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_DOUBLE_EQ(
+            res.rows()[0].get(1).to_float64(),
+            31.0);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_DOUBLE_EQ(
+            res.rows()[0].get(2).to_float64(),
+            5.25);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+        EXPECT_DOUBLE_EQ(
+            res.rows()[0].get(3).to_float64(),
+            5.5);  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     }
 }
 
