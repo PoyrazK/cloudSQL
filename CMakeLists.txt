@@ -150,6 +150,14 @@ if(BUILD_TESTS)
     add_executable(recovery_tests tests/recovery_tests.cpp)
     target_link_libraries(recovery_tests PRIVATE sqlEngineCore)
 
+    # Create recovery manager unit tests
+    add_executable(recovery_manager_tests tests/recovery_manager_tests.cpp)
+    target_link_libraries(recovery_manager_tests PRIVATE sqlEngineCore)
+
+    # Create buffer pool unit tests
+    add_executable(buffer_pool_tests tests/buffer_pool_tests.cpp)
+    target_link_libraries(buffer_pool_tests PRIVATE sqlEngineCore)
+
     # Check if GoogleTest is available
     find_package(GTest QUIET)
     if(GTest_FOUND)

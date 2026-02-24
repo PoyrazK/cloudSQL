@@ -19,7 +19,11 @@
 #include "catalog/catalog.hpp"
 #include "common/config.hpp"
 #include "network/server.hpp"
-#include "storage/storage_manager.hpp"
+#include "parser/lexer.hpp" // Added by user instruction
+#include "recovery/log_manager.hpp" // Added by user instruction
+#include "recovery/recovery_manager.hpp" // Added by user instruction
+#include "storage/buffer_pool_manager.hpp"
+#include "storage/storage_manager.hpp" // Added by user instruction
 
 namespace {
 
@@ -117,9 +121,9 @@ int main(int argc, char* argv[]) { // NOLINT(bugprone-exception-escape)
     static_cast<void>(std::signal(SIGTERM, signal_handler));
 
     try {
-        /* Initialize storage manager */
-        const auto storage_manager = std::make_unique<cloudsql::storage::StorageManager>(config.data_dir);
-
+        /* Initialize storage manager & buffer pool */
+        auto disk_manager = std::make_unique<cloudsql::storage::StorageManager>(config.data_dir);
+        auto bpm = std::make_unique<cloudsql::storage::BufferPoolManager>(128, *disk_manager);
         /* Initialize catalog */
         const auto catalog = cloudsql::Catalog::create();
         if (!catalog) {
@@ -127,8 +131,18 @@ int main(int argc, char* argv[]) { // NOLINT(bugprone-exception-escape)
             return 1;
         }
 
+        /* Initialize log manager & run recovery */
+        auto log_manager = std::make_unique<cloudsql::recovery::LogManager>(config.data_dir + "/wal.log");
+        
+        std::cout << "Running Crash Recovery..." << std::endl;
+        cloudsql::recovery::RecoveryManager rm(*bpm, *catalog, *log_manager);
+        if (!rm.recover()) {
+            std::cerr << "Crash recovery failed. Restarting anyway.\n";
+        }
+        log_manager->run_flush_thread();
+
         /* Initialize server */
-        g_server = cloudsql::network::Server::create(config.port, *catalog, *storage_manager);
+        g_server = cloudsql::network::Server::create(config.port, *catalog, *bpm);
         if (!g_server) {
             std::cerr << "Failed to create server\n";
             return 1;
