@@ -42,7 +42,7 @@ Transaction* TransactionManager::begin(IsolationLevel level) {
 
     txn->set_snapshot(std::move(snapshot));
 
-    Transaction* const txn_ptr = txn.get();
+    Transaction* txn_ptr = txn.get();
     active_transactions_[txn_id] = std::move(txn);
 
     return txn_ptr;
@@ -118,7 +118,7 @@ void TransactionManager::undo_transaction(Transaction* txn) {
             schema.add_column(col.name, col.type);
         }
 
-        storage::HeapTable table(log.table_name, storage_manager_, schema);
+        storage::HeapTable table(log.table_name, bpm_, schema);
 
         switch (log.type) {
             case UndoLog::Type::INSERT:
