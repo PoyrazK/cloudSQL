@@ -134,7 +134,10 @@ int main() {
     RUN_TEST(LockManager_Wait);
     RUN_TEST(LockManager_Deadlock);
 
-        std::cout << "\nResults: " << tests_passed << " passed, ";
-    std::cout << tests_failed << " failed\n";
+            std::cout << "
+Results: ";
+    std::cout << tests_passed << " passed, ";
+    std::cout << tests_failed << " failed
+";
     return (tests_failed > 0);
 }

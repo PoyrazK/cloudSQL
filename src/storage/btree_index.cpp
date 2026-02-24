@@ -35,7 +35,7 @@ BTreeIndex::Iterator::Iterator(BTreeIndex& index, uint32_t page, uint16_t slot)
 
 bool BTreeIndex::Iterator::next(Entry& out_entry) {
     while (!eof_) {
-        std::array<char, Page::PAGE_SIZE> buffer {};
+        std::array<char, Page::PAGE_SIZE> buffer{};
         if (!index_.read_page(current_page_, buffer.data())) {
             eof_ = true;
             return false;
@@ -109,7 +109,7 @@ bool BTreeIndex::create() {
     }
 
     /* Initialize root page */
-    std::array<char, Page::PAGE_SIZE> buffer {};
+    std::array<char, Page::PAGE_SIZE> buffer{};
     NodeHeader header {};
     header.type = NodeType::Leaf;
     header.num_keys = 0;
@@ -134,7 +134,7 @@ bool BTreeIndex::drop() {
 
 bool BTreeIndex::insert(const common::Value& key, HeapTable::TupleId tuple_id) {
     const uint32_t leaf_page = find_leaf(key);
-    std::array<char, Page::PAGE_SIZE> buffer {};
+    std::array<char, Page::PAGE_SIZE> buffer{};
     if (!read_page(leaf_page, buffer.data())) {
         return false;
     }
@@ -173,7 +173,7 @@ bool BTreeIndex::remove(const common::Value& key, HeapTable::TupleId tuple_id) {
 
 std::vector<HeapTable::TupleId> BTreeIndex::search(const common::Value& key) {
     const uint32_t leaf_page = find_leaf(key);
-    std::array<char, Page::PAGE_SIZE> buffer {};
+    std::array<char, Page::PAGE_SIZE> buffer{};
     if (!read_page(leaf_page, buffer.data())) {
         return {};
     }
