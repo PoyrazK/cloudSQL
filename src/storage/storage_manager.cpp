@@ -130,8 +130,7 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
 /**
  * @brief Write a page to storage
  */
-bool StorageManager::write_page(const std::string& filename, uint32_t page_num,
-                                const char* buffer) {
+bool StorageManager::write_page(const std::string& filename, uint32_t page_num, const char* buffer) {
     if (open_files_.find(filename) == open_files_.end()) {
         if (!open_file(filename)) {
             return false;
@@ -159,12 +158,13 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num,
     return true;
 }
 
-    /**
-     * @brief Create data directory if it doesn't exist
-     */
-    bool StorageManager::create_dir_if_not_exists() {
-        struct stat st {};
-        if (stat(data_dir_.c_str(), &st) != 0) {        if (mkdir(data_dir_.c_str(), DEFAULT_DIR_MODE) != 0) {
+/**
+ * @brief Create data directory if it doesn't exist
+ */
+bool StorageManager::create_dir_if_not_exists() {
+    struct stat st {};
+    if (stat(data_dir_.c_str(), &st) != 0) {
+        if (mkdir(data_dir_.c_str(), DEFAULT_DIR_MODE) != 0) {
             return false;
         }
     }
@@ -172,3 +172,5 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num,
 }
 
 }  // namespace cloudsql::storage
+
+/** @} */
