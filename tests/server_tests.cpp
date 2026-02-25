@@ -3,17 +3,18 @@
  * @brief Unit tests for Network Server and Protocol
  */
 
-#include <arpa/inet.h>  // IWYU pragma: keep
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>  // IWYU pragma: keep
+#include <arpa/inet.h>   // IWYU pragma: keep
+#include <netinet/in.h>  // IWYU pragma: keep
+#include <sys/socket.h>  // IWYU pragma: keep
+#include <sys/types.h>   // IWYU pragma: keep
+#include <unistd.h>      // IWYU pragma: keep
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -23,11 +24,13 @@
 #include <vector>
 
 #include "catalog/catalog.hpp"
+#include "common/config.hpp"
 #include "common/value.hpp"
 #include "executor/types.hpp"
 #include "network/server.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
+#include "storage/storage_manager.hpp"
 #include "test_utils.hpp"
 
 using namespace cloudsql;
@@ -58,7 +61,7 @@ constexpr int READY_LEN = 6;
 void test_Server_StatusStrings() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     Server s(PORT_STATUS, *catalog, sm);
 
     EXPECT_EQ(s.get_status_string(), std::string("Stopped"));
@@ -71,7 +74,7 @@ void test_Server_StatusStrings() {
 void test_Server_SimpleQuery() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     const uint16_t port = PORT_SIMPLE;
 
     /* Register table in catalog */
@@ -90,17 +93,19 @@ void test_Server_SimpleQuery() {
 
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    struct sockaddr sa {};
+    std::memcpy(&sa, &addr, sizeof(addr));
 
     int sock = -1;
     for (int i = 0; i < CONN_RETRIES; ++i) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock >= 0) {
-            if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
-                0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            if (connect(sock, &sa, sizeof(addr)) == 0) {
                 break;
             }
             static_cast<void>(close(sock));
@@ -114,7 +119,7 @@ void test_Server_SimpleQuery() {
                                                  htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
         static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
 
-        std::array<char, BUF_SIZE> buffer {};
+        std::array<char, BUF_SIZE> buffer{};
         static_cast<void>(recv(sock, buffer.data(), AUTH_OK_LEN, 0));  // AuthOK
         static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));    // ReadyForQuery
 
@@ -168,25 +173,27 @@ void test_Server_SimpleQuery() {
 void test_Server_InvalidProtocol() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     const uint16_t port = PORT_INVALID;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
+    struct sockaddr sa {};
+    std::memcpy(&sa, &addr, sizeof(addr));
+
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
-            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (connect(sock, &sa, sizeof(addr)) == 0) {
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(12345)};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
 
-            std::array<char, 1> buffer {};
+            std::array<char, 1> buffer{};
             const ssize_t n = recv(sock, buffer.data(), 1, 0);
             EXPECT_EQ(n, 0);
         }
@@ -199,25 +206,27 @@ void test_Server_InvalidProtocol() {
 void test_Server_Terminate() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     const uint16_t port = PORT_TERM;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
+    struct sockaddr sa {};
+    std::memcpy(&sa, &addr, sizeof(addr));
+
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
-            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (connect(sock, &sa, sizeof(addr)) == 0) {
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
 
-            std::array<char, BUF_SIZE> buffer {};
+            std::array<char, BUF_SIZE> buffer{};
             static_cast<void>(recv(sock, buffer.data(), AUTH_OK_LEN, 0));  // AuthOK
             static_cast<void>(recv(sock, buffer.data(), READY_LEN, 0));    // ReadyForQuery
 
@@ -238,25 +247,27 @@ void test_Server_Terminate() {
 void test_Server_Handshake() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     const uint16_t port = PORT_HANDSHAKE;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
+    struct sockaddr sa {};
+    std::memcpy(&sa, &addr, sizeof(addr));
+
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
-            0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (connect(sock, &sa, sizeof(addr)) == 0) {
             // 1. SSL Request
             const std::array<uint32_t, 2> ssl_req = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_SSL_CODE))};
             static_cast<void>(send(sock, ssl_req.data(), STARTUP_PKT_LEN, 0));
-            char response {};
+            char response{};
             static_cast<void>(recv(sock, &response, 1, 0));
             EXPECT_EQ(static_cast<int>(response), static_cast<int>('N'));
 
@@ -264,7 +275,7 @@ void test_Server_Handshake() {
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
-            char type {};
+            char type{};
             static_cast<void>(recv(sock, &type, 1, 0));
             EXPECT_EQ(type, 'R');
         }
@@ -277,7 +288,7 @@ void test_Server_Handshake() {
 void test_Server_MultiClient() {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     const uint16_t port = PORT_MULTI;
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
@@ -287,22 +298,23 @@ void test_Server_MultiClient() {
     std::atomic<int> success_count{0};
 
     for (int i = 0; i < NUM_CLIENTS; ++i) {
-        clients.emplace_back([port, &success_count]() {
-            struct sockaddr_in client_addr {};
+        clients.emplace_back([&success_count]() {
+            struct sockaddr_in client_addr{};
             client_addr.sin_family = AF_INET;
-            client_addr.sin_port = htons(port);
+            client_addr.sin_port = htons(PORT_MULTI);
             inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
+
+            struct sockaddr sa {};
+            std::memcpy(&sa, &client_addr, sizeof(client_addr));
 
             const int sock = socket(AF_INET, SOCK_STREAM, 0);
             if (sock >= 0) {
-                if (connect(sock, reinterpret_cast<struct sockaddr*>(&client_addr),
-                            sizeof(client_addr)) ==
-                    0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                if (connect(sock, &sa, sizeof(client_addr)) == 0) {
                     const std::array<uint32_t, 2> startup = {
                         htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                         htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
                     static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
-                    char type {};
+                    char type{};
                     if (recv(sock, &type, 1, 0) > 0 && type == 'R') {
                         success_count++;
                     }

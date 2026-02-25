@@ -9,10 +9,12 @@
 #include <vector>
 
 #include "catalog/catalog.hpp"
+#include "common/config.hpp"
 #include "common/value.hpp"
 #include "executor/types.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
+#include "storage/storage_manager.hpp"
 #include "test_utils.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"
@@ -32,7 +34,7 @@ TEST(TransactionManager_Basic) {
     LockManager lm;
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     auto* const txn = tm.begin();
@@ -47,7 +49,7 @@ TEST(TransactionManager_Snapshot) {
     LockManager lm;
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     auto* const txn1 = tm.begin();
@@ -64,7 +66,7 @@ TEST(TransactionManager_RollbackInsert) {
     LockManager lm;
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
-    storage::BufferPoolManager sm(128, disk_manager);
+    storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     TransactionManager tm(lm, *catalog, sm);
 
     static_cast<void>(std::remove("./test_data/rb_insert.heap"));
