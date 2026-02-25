@@ -10,7 +10,9 @@
  */
 
 #include <csignal>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -19,7 +21,6 @@
 #include "catalog/catalog.hpp"
 #include "common/config.hpp"
 #include "network/server.hpp"
-#include "parser/lexer.hpp"
 #include "recovery/log_manager.hpp"
 #include "recovery/recovery_manager.hpp"
 #include "storage/buffer_pool_manager.hpp"
@@ -86,7 +87,9 @@ int main(int argc, char* argv[]) {
         for (size_t i = 1; i < args.size(); ++i) {
             const std::string& arg = args[i];
             if (arg == "-h" || arg == "--help") {
-                print_usage(argv[0]);
+                if (argc > 0) {
+                    print_usage(argv[0]);
+                }
                 return 0;
             }
             if (arg == "-v" || arg == "--version") {
@@ -109,7 +112,9 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 std::cerr << "Unknown option: " << arg << "\n";
-                print_usage(argv[0]);
+                if (argc > 0) {
+                    print_usage(argv[0]);
+                }
                 return 1;
             }
         }

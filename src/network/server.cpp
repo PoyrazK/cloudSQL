@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -335,13 +336,15 @@ void Server::handle_connection(int client_fd) {
     }
 
     /* 2. Read Rest of Startup/SSL Packet */
-    n = recv(client_fd, std::next(buffer.data(), HEADER_SIZE), len - HEADER_SIZE, 0);
+    n = recv(client_fd, std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)),
+             len - HEADER_SIZE, 0);
     if (n < static_cast<ssize_t>(len - HEADER_SIZE)) {
         static_cast<void>(close(client_fd));
         return;
     }
 
-    uint32_t protocol = ProtocolReader::read_int32(std::next(buffer.data(), HEADER_SIZE));
+    uint32_t protocol = ProtocolReader::read_int32(
+        std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)));
 
     /* Check for SSL Request */
     if (protocol == static_cast<uint32_t>(SSL_REQUEST_CODE)) {
@@ -358,12 +361,14 @@ void Server::handle_connection(int client_fd) {
             static_cast<void>(close(client_fd));
             return;
         }
-        n = recv(client_fd, std::next(buffer.data(), HEADER_SIZE), len - HEADER_SIZE, 0);
+        n = recv(client_fd, std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)),
+                 len - HEADER_SIZE, 0);
         if (n < static_cast<ssize_t>(len - HEADER_SIZE)) {
             static_cast<void>(close(client_fd));
             return;
         }
-        protocol = ProtocolReader::read_int32(std::next(buffer.data(), HEADER_SIZE));
+        protocol = ProtocolReader::read_int32(
+            std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)));
     }
 
     if (protocol != static_cast<uint32_t>(PROTOCOL_VERSION_3)) {

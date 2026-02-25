@@ -72,8 +72,8 @@ TEST(TransactionManager_RollbackInsert) {
     static_cast<void>(std::remove("./test_data/rb_insert.heap"));
     static_cast<void>(
         catalog->create_table("rb_insert", {{"id", common::ValueType::TYPE_INT64, 0}}));
-    HeapTable table("rb_insert", sm,
-                    Schema({ColumnMeta("id", common::ValueType::TYPE_INT64, true)}));
+    cloudsql::storage::HeapTable table(
+        "rb_insert", sm, Schema({ColumnMeta("id", common::ValueType::TYPE_INT64, true)}));
     static_cast<void>(table.create());
 
     auto* const txn = tm.begin();
