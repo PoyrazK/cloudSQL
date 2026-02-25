@@ -98,7 +98,7 @@ void test_Server_SimpleQuery() {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa {};
+    struct sockaddr sa{};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     int sock = -1;
@@ -183,7 +183,7 @@ void test_Server_InvalidProtocol() {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa {};
+    struct sockaddr sa{};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -216,7 +216,7 @@ void test_Server_Terminate() {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa {};
+    struct sockaddr sa{};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -257,7 +257,7 @@ void test_Server_Handshake() {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa {};
+    struct sockaddr sa{};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -304,7 +304,7 @@ void test_Server_MultiClient() {
             client_addr.sin_port = htons(PORT_MULTI);
             inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
-            struct sockaddr sa {};
+            struct sockaddr sa{};
             std::memcpy(&sa, &client_addr, sizeof(client_addr));
 
             const int sock = socket(AF_INET, SOCK_STREAM, 0);

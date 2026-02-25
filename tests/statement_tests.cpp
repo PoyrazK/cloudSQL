@@ -163,4 +163,3 @@ int main() {
     std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
     return (tests_failed > 0);
 }
-

@@ -6,15 +6,15 @@
  * @{
  */
 
+#include "network/server.hpp"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
-
-#include "network/server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -142,12 +142,12 @@ bool Server::start() {
     const int opt = 1;
     static_cast<void>(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    struct sockaddr sa {};
+    struct sockaddr sa{};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     if (bind(fd, &sa, sizeof(addr)) < 0) {
@@ -196,7 +196,7 @@ bool Server::stop() {
         const std::scoped_lock<std::mutex> lock(thread_mutex_);
         fds = client_fds_;
     }
-    
+
     for (const int fd : fds) {
         static_cast<void>(shutdown(fd, SHUT_RDWR));
     }
@@ -279,17 +279,17 @@ void Server::accept_connections() {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
-        struct timeval timeout {0, SELECT_TIMEOUT_USEC};
+        struct timeval timeout{0, SELECT_TIMEOUT_USEC};
 
         const int res = select(fd + 1, &read_fds, nullptr, nullptr, &timeout);
         if (res <= 0) {
             continue; /* Timeout or error */
         }
 
-        struct sockaddr_in client_addr {};
+        struct sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
 
-        struct sockaddr sa {};
+        struct sockaddr sa{};
         const int client_fd = accept(fd, &sa, &client_len);
         if (client_fd < 0) {
             continue;
@@ -304,7 +304,7 @@ void Server::accept_connections() {
         worker_threads_.emplace_back([this, client_fd]() {
             handle_connection(client_fd);
             static_cast<void>(stats_.connections_active.fetch_sub(1));
-            
+
             const std::scoped_lock<std::mutex> lock(thread_mutex_);
             auto it = std::remove(client_fds_.begin(), client_fds_.end(), client_fd);
             client_fds_.erase(it, client_fds_.end());
@@ -317,8 +317,7 @@ void Server::accept_connections() {
  */
 void Server::handle_connection(int client_fd) {
     std::array<char, MAX_PACKET_SIZE> buffer{};
-    executor::QueryExecutor client_executor(catalog_, bpm_, lock_manager_,
-                                            transaction_manager_);
+    executor::QueryExecutor client_executor(catalog_, bpm_, lock_manager_, transaction_manager_);
 
     /* 1. Read Length (Initial Startup/SSL) */
     ssize_t n = recv(client_fd, buffer.data(), HEADER_SIZE, 0);
@@ -371,11 +370,13 @@ void Server::handle_connection(int client_fd) {
     }
 
     /* Send AuthenticationOK ('R') */
-    const std::vector<char> auth_ok = {'R', 0, 0, 0, static_cast<char>(AUTH_OK_MSG_SIZE), 0, 0, 0, 0};
+    const std::vector<char> auth_ok = {'R', 0, 0, 0, static_cast<char>(AUTH_OK_MSG_SIZE),
+                                       0,   0, 0, 0};
     static_cast<void>(send(client_fd, auth_ok.data(), auth_ok.size(), 0));
 
     /* Send ReadyForQuery ('Z') */
-    const std::vector<char> ready = {'Z', 0, 0, 0, static_cast<char>(READY_FOR_QUERY_MSG_SIZE), 'I'};
+    const std::vector<char> ready = {'Z', 0, 0, 0, static_cast<char>(READY_FOR_QUERY_MSG_SIZE),
+                                     'I'};
     static_cast<void>(send(client_fd, ready.data(), ready.size(), 0));
 
     /* 5. Main Message Loop */
@@ -420,17 +421,21 @@ void Server::handle_connection(int client_fd) {
                         if (stmt->type() == parser::StmtType::Select) {
                             std::vector<char> desc = {'T'};
                             ProtocolWriter::append_int32(desc, 0);  // Length placeholder
-                            ProtocolWriter::append_int16(desc, 
-                                static_cast<uint16_t>(result.schema().column_count()));
+                            ProtocolWriter::append_int16(
+                                desc, static_cast<uint16_t>(result.schema().column_count()));
 
                             for (const auto& col : result.schema().columns()) {
                                 ProtocolWriter::append_string(desc, col.name());
-                                ProtocolWriter::append_int32(desc, 0);   // Table OID
-                                ProtocolWriter::append_int16(desc, 0);   // Attr index
-                                ProtocolWriter::append_int32(desc, static_cast<uint32_t>(TEXT_TYPE_OID));
-                                ProtocolWriter::append_int16(desc, static_cast<uint16_t>(-1));  // Type size
-                                ProtocolWriter::append_int32(desc, static_cast<uint32_t>(-1));  // Type modifier
-                                ProtocolWriter::append_int16(desc, static_cast<uint16_t>(TEXT_FORMAT_CODE));
+                                ProtocolWriter::append_int32(desc, 0);  // Table OID
+                                ProtocolWriter::append_int16(desc, 0);  // Attr index
+                                ProtocolWriter::append_int32(desc,
+                                                             static_cast<uint32_t>(TEXT_TYPE_OID));
+                                ProtocolWriter::append_int16(
+                                    desc, static_cast<uint16_t>(-1));  // Type size
+                                ProtocolWriter::append_int32(
+                                    desc, static_cast<uint32_t>(-1));  // Type modifier
+                                ProtocolWriter::append_int16(
+                                    desc, static_cast<uint16_t>(TEXT_FORMAT_CODE));
                             }
                             ProtocolWriter::finish_message(desc);
                             static_cast<void>(send(client_fd, desc.data(), desc.size(), 0));
@@ -439,11 +444,13 @@ void Server::handle_connection(int client_fd) {
                             for (const auto& row : result.rows()) {
                                 std::vector<char> data = {'D'};
                                 ProtocolWriter::append_int32(data, 0);  // Length
-                                ProtocolWriter::append_int16(data, static_cast<uint16_t>(row.size()));
+                                ProtocolWriter::append_int16(data,
+                                                             static_cast<uint16_t>(row.size()));
 
                                 for (const auto& val : row.values()) {
                                     const std::string s = val.to_string();
-                                    ProtocolWriter::append_int32(data, static_cast<uint32_t>(s.size()));
+                                    ProtocolWriter::append_int32(data,
+                                                                 static_cast<uint32_t>(s.size()));
                                     data.insert(data.end(), s.begin(), s.end());
                                 }
                                 ProtocolWriter::finish_message(data);
@@ -454,10 +461,10 @@ void Server::handle_connection(int client_fd) {
                         /* 3. Send CommandComplete ('C') */
                         std::vector<char> complete = {'C'};
                         const std::string msg = (stmt->type() == parser::StmtType::Select)
-                                              ? "SELECT " + std::to_string(result.row_count())
-                                              : "OK";
-                        ProtocolWriter::append_int32(complete, 
-                            static_cast<uint32_t>(4 + msg.size() + 1));
+                                                    ? "SELECT " + std::to_string(result.row_count())
+                                                    : "OK";
+                        ProtocolWriter::append_int32(complete,
+                                                     static_cast<uint32_t>(4 + msg.size() + 1));
                         ProtocolWriter::append_string(complete, msg);
                         static_cast<void>(send(client_fd, complete.data(), complete.size(), 0));
                     } else {
