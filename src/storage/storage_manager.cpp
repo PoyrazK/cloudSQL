@@ -159,13 +159,12 @@ bool StorageManager::write_page(const std::string& filename, uint32_t page_num,
     return true;
 }
 
-/**
- * @brief Create data directory if it doesn't exist
- */
-bool StorageManager::create_dir_if_not_exists() {
-    struct stat st{};
-    if (stat(data_dir_.c_str(), &st) != 0) {
-        if (mkdir(data_dir_.c_str(), DEFAULT_DIR_MODE) != 0) {
+    /**
+     * @brief Create data directory if it doesn't exist
+     */
+    bool StorageManager::create_dir_if_not_exists() {
+        struct stat st {};
+        if (stat(data_dir_.c_str(), &st) != 0) {        if (mkdir(data_dir_.c_str(), DEFAULT_DIR_MODE) != 0) {
             return false;
         }
     }
