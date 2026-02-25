@@ -91,17 +91,17 @@ void test_Server_SimpleQuery() {
     static_cast<void>(table.create());
     static_cast<void>(table.insert(executor::Tuple({common::Value(1)}), 0));
 
-        static_cast<void>(server->start());
-    
-        struct sockaddr_in addr {};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-    
-        struct sockaddr sa {};
-        std::memcpy(&sa, &addr, sizeof(addr));
-    
-        int sock = -1;
+    static_cast<void>(server->start());
+
+    struct sockaddr_in addr {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    struct sockaddr sa {};
+    std::memcpy(&sa, &addr, sizeof(addr));
+
+    int sock = -1;
     for (int i = 0; i < CONN_RETRIES; ++i) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock >= 0) {
@@ -178,12 +178,12 @@ void test_Server_InvalidProtocol() {
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr{};
+    struct sockaddr_in addr {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa{};
+    struct sockaddr sa {};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -211,12 +211,12 @@ void test_Server_Terminate() {
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr{};
+    struct sockaddr_in addr {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa{};
+    struct sockaddr sa {};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -252,12 +252,12 @@ void test_Server_Handshake() {
     auto server = Server::create(port, *catalog, sm);
     static_cast<void>(server->start());
 
-    struct sockaddr_in addr{};
+    struct sockaddr_in addr {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    struct sockaddr sa{};
+    struct sockaddr sa {};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -299,12 +299,12 @@ void test_Server_MultiClient() {
 
     for (int i = 0; i < NUM_CLIENTS; ++i) {
         clients.emplace_back([&success_count]() {
-            struct sockaddr_in client_addr{};
+            struct sockaddr_in client_addr {};
             client_addr.sin_family = AF_INET;
             client_addr.sin_port = htons(PORT_MULTI);
             inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
-            struct sockaddr sa{};
+            struct sockaddr sa {};
             std::memcpy(&sa, &client_addr, sizeof(client_addr));
 
             const int sock = socket(AF_INET, SOCK_STREAM, 0);
