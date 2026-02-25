@@ -24,7 +24,7 @@ namespace cloudsql::recovery {
 class RecoveryManager {
    public:
     RecoveryManager(storage::BufferPoolManager& bpm, Catalog& catalog, LogManager& log_manager)
-        : bpm_(bpm), catalog_(catalog), log_manager_(log_manager){}
+        : bpm_(bpm), catalog_(catalog), log_manager_(log_manager) {}
 
     ~RecoveryManager() = default;
 
