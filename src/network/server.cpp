@@ -8,13 +8,13 @@
 
 #include "network/server.hpp"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <arpa/inet.h>   // IWYU pragma: keep
+#include <netinet/in.h>  // IWYU pragma: keep
+#include <sys/select.h>  // IWYU pragma: keep
+#include <sys/socket.h>  // IWYU pragma: keep
+#include <sys/time.h>    // IWYU pragma: keep
+#include <sys/types.h>   // IWYU pragma: keep
+#include <unistd.h>      // IWYU pragma: keep
 
 #include <algorithm>
 #include <array>
@@ -142,12 +142,12 @@ bool Server::start() {
     const int opt = 1;
     static_cast<void>(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
 
-    struct sockaddr_in addr{};
+    struct sockaddr_in addr {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    struct sockaddr sa{};
+    struct sockaddr sa {};
     std::memcpy(&sa, &addr, sizeof(addr));
 
     if (bind(fd, &sa, sizeof(addr)) < 0) {
@@ -279,17 +279,19 @@ void Server::accept_connections() {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
-        struct timeval timeout{0, SELECT_TIMEOUT_USEC};
+        struct timeval timeout {
+            0, SELECT_TIMEOUT_USEC
+        };
 
         const int res = select(fd + 1, &read_fds, nullptr, nullptr, &timeout);
         if (res <= 0) {
             continue; /* Timeout or error */
         }
 
-        struct sockaddr_in client_addr{};
+        struct sockaddr_in client_addr {};
         socklen_t client_len = sizeof(client_addr);
 
-        struct sockaddr sa{};
+        struct sockaddr sa {};
         const int client_fd = accept(fd, &sa, &client_len);
         if (client_fd < 0) {
             continue;
@@ -447,12 +449,12 @@ void Server::handle_connection(int client_fd) {
                                 ProtocolWriter::append_int16(data,
                                                              static_cast<uint16_t>(row.size()));
 
-                                                                for (const auto& val : row.values()) {
-                                                                    const std::string s = val.to_string();
-                                                                    ProtocolWriter::append_int32(data,
-                                                                                                 static_cast<uint32_t>(s.size()));
-                                                                    data.insert(data.end(), s.begin(), s.end());
-                                                                }
+                                for (const auto& val : row.values()) {
+                                    const std::string s = val.to_string();
+                                    ProtocolWriter::append_int32(data,
+                                                                 static_cast<uint32_t>(s.size()));
+                                    data.insert(data.end(), s.begin(), s.end());
+                                }
                                 ProtocolWriter::finish_message(data);
                                 static_cast<void>(send(client_fd, data.data(), data.size(), 0));
                             }
@@ -493,3 +495,5 @@ void Server::handle_connection(int client_fd) {
 }
 
 }  // namespace cloudsql::network
+
+/** @} */
