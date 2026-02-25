@@ -57,6 +57,17 @@ constexpr int PG_SSL_CODE = 80877103;
 constexpr int BUF_SIZE = 1024;
 constexpr int AUTH_OK_LEN = 9;
 constexpr int READY_LEN = 6;
+constexpr int TEST_TIMEOUT_SEC = 2;
+
+/**
+ * @brief Set a receive timeout on a socket to prevent hangs in tests
+ */
+void set_sock_timeout(int sock) {
+    struct timeval tv {};
+    tv.tv_sec = TEST_TIMEOUT_SEC;
+    tv.tv_usec = 0;
+    static_cast<void>(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
+}
 
 TEST(Server_StatusStrings) {
     auto catalog = Catalog::create();
@@ -105,6 +116,7 @@ TEST(Server_SimpleQuery) {
     for (int i = 0; i < CONN_RETRIES; ++i) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock >= 0) {
+            set_sock_timeout(sock);
             if (connect(sock, &sa, sizeof(addr)) == 0) {
                 break;
             }
@@ -188,6 +200,7 @@ TEST(Server_InvalidProtocol) {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
+        set_sock_timeout(sock);
         if (connect(sock, &sa, sizeof(addr)) == 0) {
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(12345)};
@@ -221,6 +234,7 @@ TEST(Server_Terminate) {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
+        set_sock_timeout(sock);
         if (connect(sock, &sa, sizeof(addr)) == 0) {
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
@@ -262,6 +276,7 @@ TEST(Server_Handshake) {
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
+        set_sock_timeout(sock);
         if (connect(sock, &sa, sizeof(addr)) == 0) {
             // 1. SSL Request
             const std::array<uint32_t, 2> ssl_req = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
@@ -298,10 +313,10 @@ TEST(Server_MultiClient) {
     std::atomic<int> success_count{0};
 
     for (int i = 0; i < NUM_CLIENTS; ++i) {
-        clients.emplace_back([&success_count]() {
+        clients.emplace_back([port, &success_count]() {
             struct sockaddr_in client_addr {};
             client_addr.sin_family = AF_INET;
-            client_addr.sin_port = htons(PORT_MULTI);
+            client_addr.sin_port = htons(port);
             inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
             struct sockaddr sa {};
@@ -309,6 +324,7 @@ TEST(Server_MultiClient) {
 
             const int sock = socket(AF_INET, SOCK_STREAM, 0);
             if (sock >= 0) {
+                set_sock_timeout(sock);
                 if (connect(sock, &sa, sizeof(client_addr)) == 0) {
                     const std::array<uint32_t, 2> startup = {
                         htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),

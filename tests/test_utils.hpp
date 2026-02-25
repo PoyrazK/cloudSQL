@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace cloudsql::tests {
@@ -26,8 +27,10 @@ inline void expect_true(bool condition, const char* expr) {
  */
 template <typename T>
 std::string to_string_safe(const T& val) {
-    if constexpr (std::is_convertible_v<T, std::string>) {
-        return static_cast<std::string>(val);
+    if constexpr (std::is_same_v<T, std::string>) {
+        return val;
+    } else if constexpr (std::is_convertible_v<T, const char*>) {
+        return std::string(val);
     } else if constexpr (std::is_arithmetic_v<T>) {
         return std::to_string(val);
     } else {
@@ -37,10 +40,10 @@ std::string to_string_safe(const T& val) {
 
 template <typename T, typename U>
 void expect_eq(const T& a, const U& b, const char* expr_a, const char* expr_b) {
-    if (a != b) {
+    if (!(a == b)) {
         throw std::runtime_error(std::string("Equality failed: ") + expr_a + " (" +
-                                 to_string_safe(a) + ") != " + expr_b + " (" + to_string_safe(b) +
-                                 ")");
+                                 to_string_safe(a) + ") != " + expr_b + " (" +
+                                 to_string_safe(b) + ")");
     }
 }
 
