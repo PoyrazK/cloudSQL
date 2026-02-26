@@ -18,6 +18,7 @@
 #include "common/value.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
+#include "storage/page.hpp"
 
 namespace cloudsql::storage {
 
@@ -47,7 +48,7 @@ bool BTreeIndex::Iterator::next(Entry& out_entry) {
         if (current_slot_ >= header.num_keys) {
             /* Move to next leaf if exists */
             if (header.next_leaf != 0) {
-                current_page = header.next_leaf;
+                current_page_ = header.next_leaf;
                 current_slot_ = 0;
                 continue;
             }

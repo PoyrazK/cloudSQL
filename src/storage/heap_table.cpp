@@ -22,6 +22,7 @@
 #include "common/value.hpp"
 #include "executor/types.hpp"
 #include "storage/buffer_pool_manager.hpp"
+#include "storage/page.hpp"
 
 namespace cloudsql::storage {
 

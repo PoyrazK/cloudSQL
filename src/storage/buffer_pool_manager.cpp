@@ -146,7 +146,7 @@ bool BufferPoolManager::flush_page(const std::string& file_name, uint32_t page_i
     return true;
 }
 
-Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* const page_id) {
+Page* BufferPoolManager::new_page(const std::string& file_name, const uint32_t* const page_id) {
     const std::lock_guard<std::mutex> lock(latch_);
 
     // We need to determine the new page ID. In our basic layout, we'll
