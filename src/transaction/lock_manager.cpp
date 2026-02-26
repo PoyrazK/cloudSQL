@@ -5,6 +5,7 @@
 
 #include "transaction/lock_manager.hpp"
 
+#include <chrono>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -29,8 +30,9 @@ bool LockManager::acquire_shared(Transaction* txn, const std::string& rid) {
     queue.request_queue.push_back({txn->get_id(), LockMode::SHARED, false});
     const auto it = std::prev(queue.request_queue.end());  // Iterator to our request
 
-    /* Wait loop */
-    queue.cv.wait(lock, [&]() {
+    /* Wait loop with timeout to avoid permanent hangs */
+    const auto timeout = std::chrono::milliseconds(1000);
+    const bool success = queue.cv.wait_for(lock, timeout, [&]() {
         /* Check if we are aborted */
         if (txn->get_state() == TransactionState::ABORTED) {
             return true;
@@ -48,7 +50,7 @@ bool LockManager::acquire_shared(Transaction* txn, const std::string& rid) {
         return compatible;
     });
 
-    if (txn->get_state() == TransactionState::ABORTED) {
+    if (!success || txn->get_state() == TransactionState::ABORTED) {
         static_cast<void>(queue.request_queue.erase(it));
         return false;
     }
@@ -91,7 +93,8 @@ bool LockManager::acquire_exclusive(Transaction* txn, const std::string& rid) {
     queue.request_queue.push_back({txn->get_id(), LockMode::EXCLUSIVE, false});
     const auto my_req = std::prev(queue.request_queue.end());
 
-    queue.cv.wait(lock, [&]() {
+    const auto timeout = std::chrono::milliseconds(1000);
+    const bool success = queue.cv.wait_for(lock, timeout, [&]() {
         if (txn->get_state() == TransactionState::ABORTED) {
             return true;
         }
@@ -109,7 +112,7 @@ bool LockManager::acquire_exclusive(Transaction* txn, const std::string& rid) {
         return can_grant;
     });
 
-    if (txn->get_state() == TransactionState::ABORTED) {
+    if (!success || txn->get_state() == TransactionState::ABORTED) {
         static_cast<void>(queue.request_queue.erase(my_req));
         return false;
     }

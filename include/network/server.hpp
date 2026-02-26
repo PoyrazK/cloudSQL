@@ -16,14 +16,14 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
 
 #include "catalog/catalog.hpp"
 #include "executor/query_executor.hpp"
-#include "storage/storage_manager.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction_manager.hpp"
 
@@ -57,7 +57,7 @@ class Server {
     /**
      * @brief Constructor
      */
-    Server(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager);
+    Server(uint16_t port, Catalog& catalog, storage::BufferPoolManager& bpm);
 
     /**
      * @brief Destructor
@@ -66,7 +66,7 @@ class Server {
         try {
             static_cast<void>(stop());
         } catch (...) {
-            static_cast<void>(0); // Destructors should not throw
+            static_cast<void>(0);  // Destructors should not throw
         }
         if (listen_fd_ >= 0) {
             static_cast<void>(close(listen_fd_));
@@ -83,7 +83,7 @@ class Server {
      * @brief Create a new server instance
      */
     [[nodiscard]] static std::unique_ptr<Server> create(uint16_t port, Catalog& catalog,
-                                                        storage::StorageManager& storage_manager);
+                                                        storage::BufferPoolManager& bpm);
 
     /**
      * @brief Start the server
@@ -117,7 +117,7 @@ class Server {
     ServerStatus status_ = ServerStatus::Stopped;
 
     Catalog& catalog_;
-    storage::StorageManager& storage_manager_;
+    storage::BufferPoolManager& bpm_;
     transaction::LockManager lock_manager_;
     transaction::TransactionManager transaction_manager_;
 

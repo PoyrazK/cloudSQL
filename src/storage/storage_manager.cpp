@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -114,7 +115,8 @@ bool StorageManager::read_page(const std::string& filename, uint32_t page_num, c
     if (file->gcount() < static_cast<std::streamsize>(PAGE_SIZE)) {
         if (file->eof() || file->gcount() == 0) {
             /* If we reached end of file or read nothing, zero-fill the rest */
-            std::fill(std::next(buffer, file->gcount()), std::next(buffer, static_cast<std::ptrdiff_t>(PAGE_SIZE)), 0);
+            std::fill(std::next(buffer, file->gcount()),
+                      std::next(buffer, static_cast<std::ptrdiff_t>(PAGE_SIZE)), 0);
             file->clear();
             return true;
         }
@@ -171,5 +173,6 @@ bool StorageManager::create_dir_if_not_exists() {
     return true;
 }
 
-
 }  // namespace cloudsql::storage
+
+/** @} */

@@ -8,16 +8,17 @@
 
 #include "network/server.hpp"
 
-#include <arpa/inet.h>   // IWYU pragma: keep
-#include <netinet/in.h>  // IWYU pragma: keep
-#include <sys/socket.h>  // IWYU pragma: keep
-#include <sys/types.h>   // IWYU pragma: keep
-#include <sys/select.h>  // IWYU pragma: keep
-#include <sys/time.h>    // IWYU pragma: keep
-#include <unistd.h>      // IWYU pragma: keep
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -33,7 +34,7 @@
 #include "parser/lexer.hpp"
 #include "parser/parser.hpp"
 #include "parser/statement.hpp"
-#include "storage/storage_manager.hpp"
+#include "storage/buffer_pool_manager.hpp"
 
 namespace cloudsql::network {
 
@@ -49,6 +50,23 @@ constexpr int SELECT_TIMEOUT_USEC = 100000;
 constexpr int ERROR_MSG_LEN = 9;
 constexpr size_t MIN_MSG_SIZE = 5;
 constexpr size_t HEADER_SIZE = 4;
+
+/**
+ * @brief Helper to receive exactly count bytes
+ * @return count on success, 0 on EOF, -1 on error
+ */
+ssize_t recv_all(int fd, char* buf, size_t count) {
+    size_t total = 0;
+    while (total < count) {
+        const ssize_t n =
+            recv(fd, std::next(buf, static_cast<std::ptrdiff_t>(total)), count - total, 0);
+        if (n <= 0) {
+            return n;
+        }
+        total += static_cast<size_t>(n);
+    }
+    return static_cast<ssize_t>(total);
+}
 }  // anonymous namespace
 
 /**
@@ -113,15 +131,15 @@ class ProtocolWriter {
     }
 };
 
-Server::Server(uint16_t port, Catalog& catalog, storage::StorageManager& storage_manager)
+Server::Server(uint16_t port, Catalog& catalog, storage::BufferPoolManager& bpm)
     : port_(port),
       catalog_(catalog),
-      storage_manager_(storage_manager),
-      transaction_manager_(lock_manager_, catalog, storage_manager) {}
+      bpm_(bpm),
+      transaction_manager_(lock_manager_, catalog, bpm) {}
 
 std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog,
-                                       storage::StorageManager& storage_manager) {
-    return std::make_unique<Server>(port, catalog, storage_manager);
+                                       storage::BufferPoolManager& bpm) {
+    return std::make_unique<Server>(port, catalog, bpm);
 }
 
 /**
@@ -148,7 +166,11 @@ bool Server::start() {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    if (bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    struct sockaddr_storage storage {};
+    std::memcpy(&storage, &addr, sizeof(addr));
+
+    if (bind(fd, reinterpret_cast<struct sockaddr*>(&storage),  // NOLINT
+             sizeof(addr)) < 0) {
         static_cast<void>(close(fd));
         return false;
     }
@@ -194,14 +216,21 @@ bool Server::stop() {
         const std::scoped_lock<std::mutex> lock(thread_mutex_);
         fds = client_fds_;
     }
-    
+
     for (const int fd : fds) {
         static_cast<void>(shutdown(fd, SHUT_RDWR));
     }
 
     // 2. Join the accept thread
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
+    std::thread a_thread;
+    {
+        const std::scoped_lock<std::mutex> lock(thread_mutex_);
+        if (accept_thread_.joinable()) {
+            a_thread = std::move(accept_thread_);
+        }
+    }
+    if (a_thread.joinable()) {
+        a_thread.join();
     }
 
     // 3. Join all connection worker threads
@@ -216,6 +245,11 @@ bool Server::stop() {
         }
     }
 
+    // Now close the fds
+    for (const int fd : fds) {
+        static_cast<void>(close(fd));
+    }
+
     if (fd_to_close >= 0) {
         static_cast<void>(close(fd_to_close));
     }
@@ -228,9 +262,15 @@ bool Server::stop() {
 }
 
 void Server::wait() {
-    const std::scoped_lock<std::mutex> lock(thread_mutex_);
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
+    std::thread t;
+    {
+        const std::scoped_lock<std::mutex> lock(thread_mutex_);
+        if (accept_thread_.joinable()) {
+            t = std::move(accept_thread_);
+        }
+    }
+    if (t.joinable()) {
+        t.join();
     }
 }
 
@@ -277,7 +317,9 @@ void Server::accept_connections() {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
-        struct timeval timeout {0, SELECT_TIMEOUT_USEC};
+        struct timeval timeout {
+            0, SELECT_TIMEOUT_USEC
+        };
 
         const int res = select(fd + 1, &read_fds, nullptr, nullptr, &timeout);
         if (res <= 0) {
@@ -287,10 +329,13 @@ void Server::accept_connections() {
         struct sockaddr_in client_addr {};
         socklen_t client_len = sizeof(client_addr);
 
-        const int client_fd = accept(fd, reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
+        struct sockaddr_storage storage {};
+        const int client_fd =
+            accept(fd, reinterpret_cast<struct sockaddr*>(&storage), &client_len);  // NOLINT
         if (client_fd < 0) {
             continue;
         }
+        std::memcpy(&client_addr, &storage, sizeof(client_addr));
 
         static_cast<void>(stats_.connections_accepted.fetch_add(1));
         static_cast<void>(stats_.connections_active.fetch_add(1));
@@ -300,8 +345,8 @@ void Server::accept_connections() {
         worker_threads_.emplace_back([this, client_fd]() {
             handle_connection(client_fd);
             static_cast<void>(stats_.connections_active.fetch_sub(1));
-            
-            const std::scoped_lock<std::mutex> lock(thread_mutex_);
+
+            const std::scoped_lock<std::mutex> thread_lock(thread_mutex_);
             auto it = std::remove(client_fds_.begin(), client_fds_.end(), client_fd);
             client_fds_.erase(it, client_fds_.end());
         });
@@ -313,76 +358,74 @@ void Server::accept_connections() {
  */
 void Server::handle_connection(int client_fd) {
     std::array<char, MAX_PACKET_SIZE> buffer{};
-    executor::QueryExecutor client_executor(catalog_, storage_manager_, lock_manager_,
-                                            transaction_manager_);
+    executor::QueryExecutor client_executor(catalog_, bpm_, lock_manager_, transaction_manager_);
 
     /* 1. Read Length (Initial Startup/SSL) */
-    ssize_t n = recv(client_fd, buffer.data(), HEADER_SIZE, 0);
+    ssize_t n = recv_all(client_fd, buffer.data(), HEADER_SIZE);
     if (n < static_cast<ssize_t>(HEADER_SIZE)) {
-        static_cast<void>(close(client_fd));
         return;
     }
 
     uint32_t len = ProtocolReader::read_int32(buffer.data());
     if (len > buffer.size() || len < HEADER_SIZE) {
-        static_cast<void>(close(client_fd));
         return;
     }
 
     /* 2. Read Rest of Startup/SSL Packet */
-    n = recv(client_fd, &buffer[HEADER_SIZE], len - HEADER_SIZE, 0);
+    n = recv_all(client_fd, std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)),
+                 len - HEADER_SIZE);
     if (n < static_cast<ssize_t>(len - HEADER_SIZE)) {
-        static_cast<void>(close(client_fd));
         return;
     }
 
-    uint32_t protocol = ProtocolReader::read_int32(&buffer[HEADER_SIZE]);
+    uint32_t protocol = ProtocolReader::read_int32(
+        std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)));
 
     /* Check for SSL Request */
     if (protocol == static_cast<uint32_t>(SSL_REQUEST_CODE)) {
         const char ssl_deny = 'N';
         static_cast<void>(send(client_fd, &ssl_deny, 1, 0));
 
-        n = recv(client_fd, buffer.data(), HEADER_SIZE, 0);
+        n = recv_all(client_fd, buffer.data(), HEADER_SIZE);
         if (n < static_cast<ssize_t>(HEADER_SIZE)) {
-            static_cast<void>(close(client_fd));
             return;
         }
         len = ProtocolReader::read_int32(buffer.data());
         if (len < HEADER_SIZE || len > buffer.size()) {
-            static_cast<void>(close(client_fd));
             return;
         }
-        n = recv(client_fd, &buffer[HEADER_SIZE], len - HEADER_SIZE, 0);
+        n = recv_all(client_fd, std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)),
+                     len - HEADER_SIZE);
         if (n < static_cast<ssize_t>(len - HEADER_SIZE)) {
-            static_cast<void>(close(client_fd));
             return;
         }
-        protocol = ProtocolReader::read_int32(&buffer[HEADER_SIZE]);
+        protocol = ProtocolReader::read_int32(
+            std::next(buffer.data(), static_cast<std::ptrdiff_t>(HEADER_SIZE)));
     }
 
     if (protocol != static_cast<uint32_t>(PROTOCOL_VERSION_3)) {
-        static_cast<void>(close(client_fd));
         return;
     }
 
     /* Send AuthenticationOK ('R') */
-    const std::vector<char> auth_ok = {'R', 0, 0, 0, static_cast<char>(AUTH_OK_MSG_SIZE), 0, 0, 0, 0};
+    const std::vector<char> auth_ok = {'R', 0, 0, 0, static_cast<char>(AUTH_OK_MSG_SIZE),
+                                       0,   0, 0, 0};
     static_cast<void>(send(client_fd, auth_ok.data(), auth_ok.size(), 0));
 
     /* Send ReadyForQuery ('Z') */
-    const std::vector<char> ready = {'Z', 0, 0, 0, static_cast<char>(READY_FOR_QUERY_MSG_SIZE), 'I'};
+    const std::vector<char> ready = {'Z', 0, 0, 0, static_cast<char>(READY_FOR_QUERY_MSG_SIZE),
+                                     'I'};
     static_cast<void>(send(client_fd, ready.data(), ready.size(), 0));
 
     /* 5. Main Message Loop */
     while (is_running()) {
         char type = '\0';
-        n = recv(client_fd, &type, 1, 0);
+        n = recv_all(client_fd, &type, 1);
         if (n <= 0) {
             break;
         }
 
-        n = recv(client_fd, buffer.data(), HEADER_SIZE, 0);
+        n = recv_all(client_fd, buffer.data(), HEADER_SIZE);
         if (n < static_cast<ssize_t>(HEADER_SIZE)) {
             break;
         }
@@ -393,7 +436,7 @@ void Server::handle_connection(int client_fd) {
 
         std::vector<char> body(len - HEADER_SIZE);
         if (len > HEADER_SIZE) {
-            n = recv(client_fd, body.data(), len - HEADER_SIZE, 0);
+            n = recv_all(client_fd, body.data(), len - HEADER_SIZE);
             if (n < static_cast<ssize_t>(len - HEADER_SIZE)) {
                 break;
             }
@@ -416,17 +459,21 @@ void Server::handle_connection(int client_fd) {
                         if (stmt->type() == parser::StmtType::Select) {
                             std::vector<char> desc = {'T'};
                             ProtocolWriter::append_int32(desc, 0);  // Length placeholder
-                            ProtocolWriter::append_int16(desc, 
-                                static_cast<uint16_t>(result.schema().column_count()));
+                            ProtocolWriter::append_int16(
+                                desc, static_cast<uint16_t>(result.schema().column_count()));
 
                             for (const auto& col : result.schema().columns()) {
                                 ProtocolWriter::append_string(desc, col.name());
-                                ProtocolWriter::append_int32(desc, 0);   // Table OID
-                                ProtocolWriter::append_int16(desc, 0);   // Attr index
-                                ProtocolWriter::append_int32(desc, static_cast<uint32_t>(TEXT_TYPE_OID));
-                                ProtocolWriter::append_int16(desc, static_cast<uint16_t>(-1));  // Type size
-                                ProtocolWriter::append_int32(desc, static_cast<uint32_t>(-1));  // Type modifier
-                                ProtocolWriter::append_int16(desc, static_cast<uint16_t>(TEXT_FORMAT_CODE));
+                                ProtocolWriter::append_int32(desc, 0);  // Table OID
+                                ProtocolWriter::append_int16(desc, 0);  // Attr index
+                                ProtocolWriter::append_int32(desc,
+                                                             static_cast<uint32_t>(TEXT_TYPE_OID));
+                                ProtocolWriter::append_int16(
+                                    desc, static_cast<uint16_t>(-1));  // Type size
+                                ProtocolWriter::append_int32(
+                                    desc, static_cast<uint32_t>(-1));  // Type modifier
+                                ProtocolWriter::append_int16(
+                                    desc, static_cast<uint16_t>(TEXT_FORMAT_CODE));
                             }
                             ProtocolWriter::finish_message(desc);
                             static_cast<void>(send(client_fd, desc.data(), desc.size(), 0));
@@ -435,11 +482,13 @@ void Server::handle_connection(int client_fd) {
                             for (const auto& row : result.rows()) {
                                 std::vector<char> data = {'D'};
                                 ProtocolWriter::append_int32(data, 0);  // Length
-                                ProtocolWriter::append_int16(data, static_cast<uint16_t>(row.size()));
+                                ProtocolWriter::append_int16(data,
+                                                             static_cast<uint16_t>(row.size()));
 
                                 for (const auto& val : row.values()) {
                                     const std::string s = val.to_string();
-                                    ProtocolWriter::append_int32(data, static_cast<uint32_t>(s.size()));
+                                    ProtocolWriter::append_int32(data,
+                                                                 static_cast<uint32_t>(s.size()));
                                     data.insert(data.end(), s.begin(), s.end());
                                 }
                                 ProtocolWriter::finish_message(data);
@@ -450,10 +499,10 @@ void Server::handle_connection(int client_fd) {
                         /* 3. Send CommandComplete ('C') */
                         std::vector<char> complete = {'C'};
                         const std::string msg = (stmt->type() == parser::StmtType::Select)
-                                              ? "SELECT " + std::to_string(result.row_count())
-                                              : "OK";
-                        ProtocolWriter::append_int32(complete, 
-                            static_cast<uint32_t>(4 + msg.size() + 1));
+                                                    ? "SELECT " + std::to_string(result.row_count())
+                                                    : "OK";
+                        ProtocolWriter::append_int32(complete,
+                                                     static_cast<uint32_t>(4 + msg.size() + 1));
                         ProtocolWriter::append_string(complete, msg);
                         static_cast<void>(send(client_fd, complete.data(), complete.size(), 0));
                     } else {
@@ -477,8 +526,8 @@ void Server::handle_connection(int client_fd) {
         /* Ready for Query */
         static_cast<void>(send(client_fd, ready.data(), ready.size(), 0));
     }
-
-    static_cast<void>(close(client_fd));
 }
 
 }  // namespace cloudsql::network
+
+/** @} */

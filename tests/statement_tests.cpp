@@ -3,10 +3,13 @@
  * @brief Unit tests for SQL Statement serialization
  */
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "common/value.hpp"
 #include "parser/expression.hpp"
@@ -20,8 +23,8 @@ using namespace cloudsql::common;
 
 namespace {
 
-using cloudsql::tests::tests_passed;
 using cloudsql::tests::tests_failed;
+using cloudsql::tests::tests_passed;
 
 constexpr int64_t VAL_18 = 18;
 constexpr int64_t VAL_5 = 5;
@@ -148,11 +151,11 @@ TEST(CreateTableStatement_Complex) {
                  "CREATE TABLE complex_table (id INT PRIMARY KEY, name TEXT NOT NULL UNIQUE)");
 }
 
-} // namespace
+}  // namespace
 
 int main() {
-    std::cout << "Statement Serialization Tests" << "\n";
-    std::cout << "=============================" << "\n";
+    std::cout << "Statement Serialization Tests\n";
+    std::cout << "=============================\n";
 
     RUN_TEST(SelectStatement_Complex);
     RUN_TEST(InsertStatement_MultiRow);
@@ -160,8 +163,6 @@ int main() {
     RUN_TEST(DeleteStatement_Basic);
     RUN_TEST(CreateTableStatement_Complex);
 
-    std::cout << "\n"
-              << "Results: " << tests_passed << " passed, " << tests_failed << " failed"
-              << "\n";
+    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

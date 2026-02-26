@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "common/value.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
-#include "storage/storage_manager.hpp"
 
 namespace cloudsql::storage {
 
@@ -68,12 +68,12 @@ class BTreeIndex {
    private:
     std::string index_name_;
     std::string filename_;
-    StorageManager& storage_manager_;
+    BufferPoolManager& bpm_;
     common::ValueType key_type_;
     uint32_t root_page_ = 0;
 
    public:
-    BTreeIndex(std::string index_name, StorageManager& storage_manager, common::ValueType key_type);
+    BTreeIndex(std::string index_name, BufferPoolManager& bpm, common::ValueType key_type);
 
     ~BTreeIndex() = default;
 
@@ -110,8 +110,6 @@ class BTreeIndex {
     bool write_page(uint32_t page_num, const char* buffer);
     [[nodiscard]] uint32_t allocate_page();
 };
-
-
 
 }  // namespace cloudsql::storage
 

@@ -4,15 +4,16 @@
  */
 
 #include <cassert>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <vector>
 #include <utility>
-#include <cstdint>
+#include <vector>
 
 #include "common/value.hpp"
+#include "executor/types.hpp"
 #include "recovery/log_manager.hpp"
 #include "recovery/log_record.hpp"
 #include "storage/heap_table.hpp"
@@ -26,8 +27,8 @@ using namespace cloudsql::storage;
 
 namespace {
 
-using cloudsql::tests::tests_passed;
 using cloudsql::tests::tests_failed;
+using cloudsql::tests::tests_passed;
 
 constexpr uint64_t TXN_100 = 100;
 constexpr lsn_t PREV_LSN_99 = 99;
@@ -57,8 +58,8 @@ TEST(LogRecordSerialization) {
     values.emplace_back(Value::make_text("test_string"));
     const Tuple tuple(std::move(values));
 
-    LogRecord original(TXN_100, PREV_LSN_99, LogRecordType::INSERT, "test_table", HeapTable::TupleId(1, 2),
-                       tuple);
+    LogRecord original(TXN_100, PREV_LSN_99, LogRecordType::INSERT, "test_table",
+                       HeapTable::TupleId(1, 2), tuple);
     original.lsn_ = CUR_LSN_101;
     original.size_ = original.get_size();
 
@@ -93,8 +94,8 @@ TEST(LogRecordAllTypes) {
     values.emplace_back(Value::make_null());
 
     const Tuple tuple(std::move(values));
-    LogRecord original(TXN_50, PREV_LSN_49, LogRecordType::INSERT, "types_table", HeapTable::TupleId(1, 1),
-                       tuple);
+    LogRecord original(TXN_50, PREV_LSN_49, LogRecordType::INSERT, "types_table",
+                       HeapTable::TupleId(1, 1), tuple);
     original.size_ = original.get_size();
 
     std::vector<char> buffer(original.size_);
@@ -102,7 +103,9 @@ TEST(LogRecordAllTypes) {
 
     const LogRecord deserialized = LogRecord::deserialize(buffer.data());
 
-    EXPECT_EQ(deserialized.tuple_.size(), static_cast<size_t>(7)); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+    EXPECT_EQ(deserialized.tuple_.size(),
+              static_cast<size_t>(
+                  7));  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     EXPECT_TRUE(deserialized.tuple_.get(0).as_bool());
     EXPECT_EQ(deserialized.tuple_.get(1).as_int8(), INT8_10);
     EXPECT_EQ(deserialized.tuple_.get(2).as_int16(), INT16_200);
@@ -143,18 +146,16 @@ TEST(LogManagerBasic) {
     cleanup(log_file);
 }
 
-} // namespace
+}  // namespace
 
 int main() {
-    std::cout << "cloudSQL Recovery Test Suite" << "\n";
-    std::cout << "============================" << "\n";
+    std::cout << "Unit Tests\n";
+    std::cout << "==========\n";
 
     RUN_TEST(LogRecordSerialization);
     RUN_TEST(LogRecordAllTypes);
     RUN_TEST(LogManagerBasic);
 
-    std::cout << "\n"
-              << "Results: " << tests_passed << " passed, " << tests_failed << " failed"
-              << "\n";
+    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
     return (tests_failed > 0);
 }

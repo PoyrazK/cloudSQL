@@ -502,7 +502,8 @@ bool AggregateOperator::open() {
                     break;
                 case AggregateType::Avg:
                     if (state.counts[i] > 0) {
-                        row.push_back(common::Value::make_float64(state.sums[i] / static_cast<double>(state.counts[i])));
+                        row.push_back(common::Value::make_float64(
+                            state.sums[i] / static_cast<double>(state.counts[i])));
                     } else {
                         row.push_back(common::Value::make_null());
                     }
@@ -593,7 +594,7 @@ bool HashJoinOperator::next(Tuple& out_tuple) {
 
                 /* Concatenate left and right tuples */
                 if (left_tuple_.has_value()) {
-                    std::vector<common::Value> joined_values = left_tuple_->value().values();
+                    std::vector<common::Value> joined_values = left_tuple_->values();
                     joined_values.insert(joined_values.end(), right_tuple.values().begin(),
                                          right_tuple.values().end());
 

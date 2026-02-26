@@ -24,8 +24,7 @@ constexpr std::chrono::milliseconds FLUSH_TIMEOUT(30);
 }  // anonymous namespace
 
 LogManager::LogManager(std::string log_file_path)
-    : log_file_path_(std::move(log_file_path)),
-      log_buffer_(new char[log_buffer_size_]) {
+    : log_file_path_(std::move(log_file_path)), log_buffer_(new char[log_buffer_size_]) {
     // Open log file in binary append mode
     log_stream_.open(log_file_path_, std::ios::binary | std::ios::app | std::ios::out);
     if (!log_stream_.is_open()) {
@@ -71,7 +70,7 @@ lsn_t LogManager::append_log_record(LogRecord& log_record) {
     // If record size > buffer size, flush first
     const uint32_t record_size = log_record.get_size();
     if (log_buffer_offset_ + record_size > log_buffer_size_) {
-        flush(true);
+        flush_internal();
     }
 
     // Assign LSN
@@ -79,7 +78,8 @@ lsn_t LogManager::append_log_record(LogRecord& log_record) {
     log_record.lsn_ = lsn;
 
     // Serialize to buffer
-    static_cast<void>(log_record.serialize(std::next(log_buffer_, static_cast<std::ptrdiff_t>(log_buffer_offset_))));
+    static_cast<void>(log_record.serialize(
+        std::next(log_buffer_, static_cast<std::ptrdiff_t>(log_buffer_offset_))));
     log_buffer_offset_ += record_size;
 
     return lsn;
@@ -88,7 +88,10 @@ lsn_t LogManager::append_log_record(LogRecord& log_record) {
 void LogManager::flush(bool force) {
     (void)force;
     const std::unique_lock<std::mutex> lock(latch_);
+    flush_internal();
+}
 
+void LogManager::flush_internal() {
     if (log_buffer_offset_ > 0) {
         log_stream_.write(log_buffer_, static_cast<std::streamsize>(log_buffer_offset_));
         log_stream_.flush();
@@ -105,10 +108,7 @@ void LogManager::flush_thread_loop() {
         }));
 
         if (log_buffer_offset_ > 0) {
-            log_stream_.write(log_buffer_, static_cast<std::streamsize>(log_buffer_offset_));
-            log_stream_.flush();
-            persistent_lsn_ = next_lsn_.load() - 1;
-            log_buffer_offset_ = 0;
+            flush_internal();
         }
     }
 }

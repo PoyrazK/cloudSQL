@@ -20,6 +20,9 @@ namespace cloudsql::transaction {
 Transaction* TransactionManager::begin(IsolationLevel level) {
     const std::scoped_lock<std::mutex> lock(manager_latch_);
 
+    /* Clean up old completed transactions to avoid memory leak */
+    completed_transactions_.clear();
+
     const txn_id_t txn_id = next_txn_id_++;
     auto txn = std::make_unique<Transaction>(txn_id, level);
 
@@ -71,7 +74,11 @@ void TransactionManager::commit(Transaction* txn) {
     }
 
     const std::scoped_lock<std::mutex> lock(manager_latch_);
-    static_cast<void>(active_transactions_.erase(txn->get_id()));
+    auto it = active_transactions_.find(txn->get_id());
+    if (it != active_transactions_.end()) {
+        completed_transactions_[txn->get_id()] = std::move(it->second);
+        static_cast<void>(active_transactions_.erase(it));
+    }
 }
 
 void TransactionManager::abort(Transaction* txn) {
@@ -99,7 +106,11 @@ void TransactionManager::abort(Transaction* txn) {
     }
 
     const std::scoped_lock<std::mutex> lock(manager_latch_);
-    static_cast<void>(active_transactions_.erase(txn->get_id()));
+    auto it = active_transactions_.find(txn->get_id());
+    if (it != active_transactions_.end()) {
+        completed_transactions_[txn->get_id()] = std::move(it->second);
+        static_cast<void>(active_transactions_.erase(it));
+    }
 }
 
 void TransactionManager::undo_transaction(Transaction* txn) {
@@ -118,7 +129,7 @@ void TransactionManager::undo_transaction(Transaction* txn) {
             schema.add_column(col.name, col.type);
         }
 
-        storage::HeapTable table(log.table_name, storage_manager_, schema);
+        storage::HeapTable table(log.table_name, bpm_, schema);
 
         switch (log.type) {
             case UndoLog::Type::INSERT:
@@ -141,6 +152,10 @@ Transaction* TransactionManager::get_transaction(txn_id_t txn_id) {
     auto it = active_transactions_.find(txn_id);
     if (it != active_transactions_.end()) {
         return it->second.get();
+    }
+    auto it_comp = completed_transactions_.find(txn_id);
+    if (it_comp != completed_transactions_.end()) {
+        return it_comp->second.get();
     }
     return nullptr;
 }
