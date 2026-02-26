@@ -154,7 +154,7 @@ TEST(Server_SimpleQuery) {
         static_cast<void>(recv(sock, body.data(), res_len - 4, 0));
 
         const ssize_t n_d = recv(sock, buffer.data(), 1, 0);
-        EXPECT_GT(n_t, 0);
+        EXPECT_GT(n_d, 0);
         EXPECT_EQ(buffer[0], 'D');
 
         static_cast<void>(recv(sock, &res_len, 4, 0));
