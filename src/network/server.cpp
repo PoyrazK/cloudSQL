@@ -232,9 +232,15 @@ bool Server::stop() {
 }
 
 void Server::wait() {
-    const std::scoped_lock<std::mutex> lock(thread_mutex_);
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
+    std::thread t;
+    {
+        const std::scoped_lock<std::mutex> lock(thread_mutex_);
+        if (accept_thread_.joinable()) {
+            t = std::move(accept_thread_);
+        }
+    }
+    if (t.joinable()) {
+        t.join();
     }
 }
 
