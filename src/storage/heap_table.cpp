@@ -451,7 +451,8 @@ bool HeapTable::create() {
 }
 
 bool HeapTable::drop() {
-    return bpm_.close_file(filename_);
+    static_cast<void>(bpm_.close_file(filename_));
+    return (std::remove(filename_.c_str()) == 0);
 }
 
 bool HeapTable::read_page(uint32_t page_num, char* buffer) const {

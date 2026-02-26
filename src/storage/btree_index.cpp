@@ -130,7 +130,8 @@ void BTreeIndex::close() {
 }
 
 bool BTreeIndex::drop() {
-    return bpm_.close_file(filename_);
+    static_cast<void>(bpm_.close_file(filename_));
+    return (std::remove(filename_.c_str()) == 0);
 }
 
 bool BTreeIndex::insert(const common::Value& key, HeapTable::TupleId tuple_id) {
