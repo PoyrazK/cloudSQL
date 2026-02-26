@@ -5,7 +5,14 @@
 
 #include "storage/buffer_pool_manager.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <string>
+
 #include "recovery/log_manager.hpp"
+#include "storage/page.hpp"
+#include "storage/storage_manager.hpp"
 
 namespace cloudsql::storage {
 
@@ -26,13 +33,13 @@ BufferPoolManager::~BufferPoolManager() {
 }
 
 Page* BufferPoolManager::fetch_page(const std::string& file_name, uint32_t page_id) {
-    std::lock_guard<std::mutex> lock(latch_);
-    std::string key = make_page_key(file_name, page_id);
+    const std::lock_guard<std::mutex> lock(latch_);
+    const std::string key = make_page_key(file_name, page_id);
 
     // 1. If page is already in the buffer pool
     if (page_table_.find(key) != page_table_.end()) {
-        uint32_t frame_id = page_table_[key];
-        Page* page = &pages_[frame_id];
+        const uint32_t frame_id = page_table_[key];
+        Page* const page = &pages_[frame_id];
         page->pin_count_++;
         replacer_.pin(frame_id);
         return page;
@@ -49,7 +56,7 @@ Page* BufferPoolManager::fetch_page(const std::string& file_name, uint32_t page_
             return nullptr;
         }
         // Write back dirty page
-        Page* victim_page = &pages_[frame_id];
+        Page* const victim_page = &pages_[frame_id];
         if (victim_page->is_dirty_) {
             // Check WAL requirements before flushing
             if (log_manager_ != nullptr && victim_page->lsn_ != -1) {
@@ -66,7 +73,7 @@ Page* BufferPoolManager::fetch_page(const std::string& file_name, uint32_t page_
     }
 
     // 3. Read the page from disk
-    Page* new_page_ptr = &pages_[frame_id];
+    Page* const new_page_ptr = &pages_[frame_id];
     new_page_ptr->reset_memory();
 
     // storage_manager_.read_page populates the buffer or zero-fills if it doesn't exist
@@ -90,15 +97,15 @@ Page* BufferPoolManager::fetch_page(const std::string& file_name, uint32_t page_
 }
 
 bool BufferPoolManager::unpin_page(const std::string& file_name, uint32_t page_id, bool is_dirty) {
-    std::lock_guard<std::mutex> lock(latch_);
-    std::string key = make_page_key(file_name, page_id);
+    const std::lock_guard<std::mutex> lock(latch_);
+    const std::string key = make_page_key(file_name, page_id);
 
     if (page_table_.find(key) == page_table_.end()) {
         return false;
     }
 
-    uint32_t frame_id = page_table_[key];
-    Page* page = &pages_[frame_id];
+    const uint32_t frame_id = page_table_[key];
+    Page* const page = &pages_[frame_id];
 
     if (page->pin_count_ <= 0) {
         return false;
@@ -117,15 +124,15 @@ bool BufferPoolManager::unpin_page(const std::string& file_name, uint32_t page_i
 }
 
 bool BufferPoolManager::flush_page(const std::string& file_name, uint32_t page_id) {
-    std::lock_guard<std::mutex> lock(latch_);
-    std::string key = make_page_key(file_name, page_id);
+    const std::lock_guard<std::mutex> lock(latch_);
+    const std::string key = make_page_key(file_name, page_id);
 
     if (page_table_.find(key) == page_table_.end()) {
         return false;
     }
 
-    uint32_t frame_id = page_table_[key];
-    Page* page = &pages_[frame_id];
+    const uint32_t frame_id = page_table_[key];
+    Page* const page = &pages_[frame_id];
 
     // Check WAL requirements before flushing
     if (log_manager_ != nullptr && page->lsn_ != -1) {
@@ -139,8 +146,8 @@ bool BufferPoolManager::flush_page(const std::string& file_name, uint32_t page_i
     return true;
 }
 
-Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* page_id) {
-    std::lock_guard<std::mutex> lock(latch_);
+Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* const page_id) {
+    const std::lock_guard<std::mutex> lock(latch_);
 
     // We need to determine the new page ID. In our basic layout, we'll
     // assume the caller knows the ID, but wait, the signature expects us to
@@ -150,8 +157,8 @@ Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* page_i
     // or we have a way to know the next ID.
     // Wait, the interface says `Output param for the id of the created page`. Currently
     // let's just use the passed in page_id as the requested page ID to create.
-    uint32_t target_page_id = *page_id;
-    std::string key = make_page_key(file_name, target_page_id);
+    const uint32_t target_page_id = *page_id;
+    const std::string key = make_page_key(file_name, target_page_id);
 
     // If already exists, return
     if (page_table_.find(key) != page_table_.end()) {
@@ -166,7 +173,7 @@ Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* page_i
         if (!replacer_.victim(&frame_id)) {
             return nullptr;
         }
-        Page* victim_page = &pages_[frame_id];
+        Page* const victim_page = &pages_[frame_id];
         if (victim_page->is_dirty_) {
             if (log_manager_ != nullptr && victim_page->lsn_ != -1) {
                 if (victim_page->lsn_ > log_manager_->get_persistent_lsn()) {
@@ -179,7 +186,7 @@ Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* page_i
         page_table_.erase(make_page_key(victim_page->file_name_, victim_page->page_id_));
     }
 
-    Page* new_page_ptr = &pages_[frame_id];
+    Page* const new_page_ptr = &pages_[frame_id];
     new_page_ptr->reset_memory();
 
     // Explicitly write a blank page to storage to instantiate it
@@ -198,15 +205,15 @@ Page* BufferPoolManager::new_page(const std::string& file_name, uint32_t* page_i
 }
 
 bool BufferPoolManager::delete_page(const std::string& file_name, uint32_t page_id) {
-    std::lock_guard<std::mutex> lock(latch_);
-    std::string key = make_page_key(file_name, page_id);
+    const std::lock_guard<std::mutex> lock(latch_);
+    const std::string key = make_page_key(file_name, page_id);
 
     if (page_table_.find(key) == page_table_.end()) {
         return true;
     }
 
-    uint32_t frame_id = page_table_[key];
-    Page* page = &pages_[frame_id];
+    const uint32_t frame_id = page_table_[key];
+    Page* const page = &pages_[frame_id];
 
     if (page->pin_count_ > 0) {
         return false;
@@ -224,9 +231,9 @@ bool BufferPoolManager::delete_page(const std::string& file_name, uint32_t page_
 }
 
 void BufferPoolManager::flush_all_pages() {
-    std::lock_guard<std::mutex> lock(latch_);
+    const std::lock_guard<std::mutex> lock(latch_);
     for (size_t i = 0; i < pool_size_; i++) {
-        Page* page = &pages_[i];
+        Page* const page = &pages_[i];
         if (!page->file_name_.empty() && page->is_dirty_) {
             if (log_manager_ != nullptr && page->lsn_ != -1) {
                 if (page->lsn_ > log_manager_->get_persistent_lsn()) {

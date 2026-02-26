@@ -3,10 +3,13 @@
  * @brief Unit tests for SQL Statement serialization
  */
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "common/value.hpp"
 #include "parser/expression.hpp"

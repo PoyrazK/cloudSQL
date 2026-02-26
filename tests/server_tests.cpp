@@ -304,8 +304,7 @@ TEST(Server_MultiClient) {
     auto catalog = Catalog::create();
     storage::StorageManager disk_manager("./test_data");
     storage::BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
-    const uint16_t port = PORT_MULTI;
-    auto server = Server::create(port, *catalog, sm);
+    auto server = Server::create(PORT_MULTI, *catalog, sm);
     static_cast<void>(server->start());
 
     const int NUM_CLIENTS = 5;
@@ -313,10 +312,10 @@ TEST(Server_MultiClient) {
     std::atomic<int> success_count{0};
 
     for (int i = 0; i < NUM_CLIENTS; ++i) {
-        clients.emplace_back([port, &success_count]() {
+        clients.emplace_back([&success_count]() {
             struct sockaddr_in client_addr {};
             client_addr.sin_family = AF_INET;
-            client_addr.sin_port = htons(port);
+            client_addr.sin_port = htons(PORT_MULTI);
             inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
             struct sockaddr sa {};

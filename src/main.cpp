@@ -87,8 +87,8 @@ int main(int argc, char* argv[]) {
         for (size_t i = 1; i < args.size(); ++i) {
             const std::string& arg = args[i];
             if (arg == "-h" || arg == "--help") {
-                if (argc > 0) {
-                    print_usage(argv[0]);
+                if (!args.empty()) {
+                    print_usage(args[0].c_str());
                 }
                 return 0;
             }
@@ -112,8 +112,8 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 std::cerr << "Unknown option: " << arg << "\n";
-                if (argc > 0) {
-                    print_usage(argv[0]);
+                if (!args.empty()) {
+                    print_usage(args[0].c_str());
                 }
                 return 1;
             }

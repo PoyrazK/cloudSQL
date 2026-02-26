@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "common/value.hpp"
+#include "executor/types.hpp"
 #include "recovery/log_manager.hpp"
 #include "recovery/log_record.hpp"
 #include "storage/heap_table.hpp"

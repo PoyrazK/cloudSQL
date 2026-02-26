@@ -6,10 +6,6 @@
 #include "recovery/recovery_manager.hpp"
 
 #include <iostream>
-#include <vector>
-
-#include "recovery/log_record.hpp"
-#include "storage/heap_table.hpp"
 
 namespace cloudsql::recovery {
 
