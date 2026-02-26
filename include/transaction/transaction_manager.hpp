@@ -22,6 +22,7 @@ class TransactionManager {
    private:
     std::atomic<txn_id_t> next_txn_id_{1};
     std::unordered_map<txn_id_t, std::unique_ptr<Transaction>> active_transactions_;
+    std::unordered_map<txn_id_t, std::unique_ptr<Transaction>> completed_transactions_;
     LockManager& lock_manager_;
     Catalog& catalog_;
     storage::BufferPoolManager& bpm_;
