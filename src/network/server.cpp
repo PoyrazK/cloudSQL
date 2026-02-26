@@ -8,13 +8,13 @@
 
 #include "network/server.hpp"
 
-#include <arpa/inet.h>   // IWYU pragma: keep
-#include <netinet/in.h>  // IWYU pragma: keep
-#include <sys/select.h>  // IWYU pragma: keep
-#include <sys/socket.h>  // IWYU pragma: keep
-#include <sys/time.h>    // IWYU pragma: keep
-#include <sys/types.h>   // IWYU pragma: keep
-#include <unistd.h>      // IWYU pragma: keep
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>

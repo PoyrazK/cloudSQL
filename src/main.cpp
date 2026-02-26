@@ -35,7 +35,7 @@ namespace {
 /**
  * @brief Async-safe shutdown flag
  */
-std::atomic<bool> shutdown_requested{false};
+std::atomic<bool> shutdown_requested{false};  // NOLINT
 
 constexpr uint32_t CONST_MAX_PORT = 65535;
 constexpr auto SLEEP_MS = std::chrono::milliseconds(100);
