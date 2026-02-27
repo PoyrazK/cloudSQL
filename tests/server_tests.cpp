@@ -4,10 +4,10 @@
  */
 
 #include <arpa/inet.h>
+#include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include <array>
@@ -21,7 +21,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <gtest/gtest.h>
 
 #include "catalog/catalog.hpp"
 #include "common/config.hpp"
@@ -106,7 +105,8 @@ TEST(ServerTests, SimpleQuery) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock >= 0) {
             set_sock_timeout(sock);
-            if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT
+            if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+                0) {  // NOLINT
                 break;
             }
             static_cast<void>(close(sock));
@@ -187,7 +187,8 @@ TEST(ServerTests, InvalidProtocol) {
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
         set_sock_timeout(sock);
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(12345)};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
@@ -218,7 +219,8 @@ TEST(ServerTests, Terminate) {
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
         set_sock_timeout(sock);
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT
             const std::array<uint32_t, 2> startup = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_STARTUP_CODE))};
             static_cast<void>(send(sock, startup.data(), STARTUP_PKT_LEN, 0));
@@ -257,7 +259,8 @@ TEST(ServerTests, Handshake) {
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
         set_sock_timeout(sock);
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) { // NOLINT
+        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) ==
+            0) {  // NOLINT
             // 1. SSL Request
             const std::array<uint32_t, 2> ssl_req = {htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
                                                      htonl(static_cast<uint32_t>(PG_SSL_CODE))};
@@ -302,7 +305,7 @@ TEST(ServerTests, MultiClient) {
             const int sock = socket(AF_INET, SOCK_STREAM, 0);
             if (sock >= 0) {
                 set_sock_timeout(sock);
-                if (connect(sock, reinterpret_cast<struct sockaddr*>(&client_addr), // NOLINT
+                if (connect(sock, reinterpret_cast<struct sockaddr*>(&client_addr),  // NOLINT
                             sizeof(client_addr)) == 0) {
                     const std::array<uint32_t, 2> startup = {
                         htonl(static_cast<uint32_t>(STARTUP_PKT_LEN)),
