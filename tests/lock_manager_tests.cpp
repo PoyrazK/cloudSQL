@@ -3,12 +3,12 @@
  * @brief Unit tests for Lock Manager
  */
 
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <chrono>
-#include <iostream>
 #include <thread>
 
-#include "test_utils.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"
 
@@ -16,12 +16,9 @@ using namespace cloudsql::transaction;
 
 namespace {
 
-using cloudsql::tests::tests_failed;
-using cloudsql::tests::tests_passed;
-
 constexpr auto TEST_SLEEP_MS = std::chrono::milliseconds(100);
 
-TEST(LockManager_Shared) {
+TEST(LockManagerTests, Shared) {
     LockManager lm;
     Transaction txn1(1);
     Transaction txn2(2);
@@ -33,7 +30,7 @@ TEST(LockManager_Shared) {
     static_cast<void>(lm.unlock(&txn2, "RID1"));
 }
 
-TEST(LockManager_Exclusive) {
+TEST(LockManagerTests, Exclusive) {
     LockManager lm;
     Transaction txn1(1);
     Transaction txn2(2);
@@ -46,7 +43,7 @@ TEST(LockManager_Exclusive) {
     static_cast<void>(lm.unlock(&txn2, "RID1"));
 }
 
-TEST(LockManager_Upgrade) {
+TEST(LockManagerTests, Upgrade) {
     LockManager lm;
     Transaction txn1(1);
 
@@ -56,7 +53,7 @@ TEST(LockManager_Upgrade) {
     static_cast<void>(lm.unlock(&txn1, "RID1"));
 }
 
-TEST(LockManager_Wait) {
+TEST(LockManagerTests, Wait) {
     LockManager lm;
     Transaction txn1(1);
     Transaction txn2(2);
@@ -81,7 +78,7 @@ TEST(LockManager_Wait) {
 
     // Small sleep to ensure threads are waiting
     std::this_thread::sleep_for(TEST_SLEEP_MS);
-    EXPECT_TRUE(shared_granted.load() == 0);
+    EXPECT_EQ(shared_granted.load(), 0);
 
     // 3. Release Exclusive (should grant both shared)
     static_cast<void>(lm.unlock(&txn1, "RID1"));
@@ -89,13 +86,13 @@ TEST(LockManager_Wait) {
     t2.join();
     t3.join();
 
-    EXPECT_TRUE(shared_granted.load() == 2);
+    EXPECT_EQ(shared_granted.load(), 2);
 
     static_cast<void>(lm.unlock(&txn2, "RID1"));
     static_cast<void>(lm.unlock(&txn3, "RID1"));
 }
 
-TEST(LockManager_Deadlock) {
+TEST(LockManagerTests, Deadlock) {
     LockManager lm;
     Transaction txn1(1);
     Transaction txn2(2);
@@ -124,17 +121,3 @@ TEST(LockManager_Deadlock) {
 }
 
 }  // namespace
-
-int main() {
-    std::cout << "Lock Manager Unit Tests\n";
-    std::cout << "=======================\n";
-
-    RUN_TEST(LockManager_Shared);
-    RUN_TEST(LockManager_Exclusive);
-    RUN_TEST(LockManager_Upgrade);
-    RUN_TEST(LockManager_Wait);
-    RUN_TEST(LockManager_Deadlock);
-
-    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
-    return (tests_failed > 0);
-}
