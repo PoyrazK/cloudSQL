@@ -3,8 +3,9 @@
  * @brief Unit tests for Recovery Manager
  */
 
-#include <cstdio>
 #include <gtest/gtest.h>
+
+#include <cstdio>
 #include <string>
 
 #include "catalog/catalog.hpp"

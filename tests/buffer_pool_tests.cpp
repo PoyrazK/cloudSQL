@@ -3,15 +3,16 @@
  * @brief Unit tests for Buffer Pool Manager
  */
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <gtest/gtest.h>
 #include <string>
-#include <cstdint>
 
 #include "storage/buffer_pool_manager.hpp"
-#include "storage/storage_manager.hpp"
 #include "storage/page.hpp"
+#include "storage/storage_manager.hpp"
 
 using namespace cloudsql::storage;
 

@@ -3,8 +3,9 @@
  * @brief Unit tests for Log Manager and Recovery
  */
 
-#include <cstdio>
 #include <gtest/gtest.h>
+
+#include <cstdio>
 #include <string>
 
 #include "recovery/log_manager.hpp"

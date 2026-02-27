@@ -3,10 +3,11 @@
  * @brief Unit tests for Lock Manager
  */
 
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <chrono>
 #include <thread>
-#include <gtest/gtest.h>
 
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"

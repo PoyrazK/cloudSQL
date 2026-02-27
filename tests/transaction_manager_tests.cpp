@@ -4,16 +4,16 @@
  */
 
 #include <gtest/gtest.h>
+
 #include <string>
-#include <vector>
 
 #include "catalog/catalog.hpp"
 #include "common/config.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/storage_manager.hpp"
 #include "transaction/lock_manager.hpp"
-#include "transaction/transaction_manager.hpp"
 #include "transaction/transaction.hpp"
+#include "transaction/transaction_manager.hpp"
 
 using namespace cloudsql;
 using namespace cloudsql::transaction;
