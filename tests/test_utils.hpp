@@ -2,6 +2,7 @@
 #define CLOUDSQL_TESTS_TEST_UTILS_HPP
 
 #include <gtest/gtest.h>
+
 #include <string>
 #include <type_traits>
 
