@@ -1,4 +1,10 @@
-#include <iostream>
+/**
+ * @file recovery_manager_tests.cpp
+ * @brief Unit tests for Recovery Manager
+ */
+
+#include <cstdio>
+#include <gtest/gtest.h>
 #include <string>
 
 #include "catalog/catalog.hpp"
@@ -6,33 +12,27 @@
 #include "recovery/recovery_manager.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/storage_manager.hpp"
-#include "test_utils.hpp"
 
+using namespace cloudsql;
 using namespace cloudsql::recovery;
 
 namespace {
 
-using cloudsql::tests::tests_failed;
-using cloudsql::tests::tests_passed;
+constexpr size_t TEST_BPM_SIZE = 10;
 
-TEST(RecoveryManager_Basic) {
-    cloudsql::storage::StorageManager disk_manager("./test_data");
-    cloudsql::storage::BufferPoolManager bpm(10, disk_manager);
-    auto catalog = cloudsql::Catalog::create();
-    LogManager log_manager("./test_data/test.log");
+TEST(RecoveryManagerTests, Basic) {
+    const std::string log_file = "recovery_test.log";
+    static_cast<void>(std::remove(log_file.c_str()));
 
-    RecoveryManager rm(bpm, *catalog, log_manager);
+    auto catalog = Catalog::create();
+    storage::StorageManager disk_manager("./test_data");
+    storage::BufferPoolManager bpm(TEST_BPM_SIZE, disk_manager);
+    LogManager lm(log_file);
+
+    RecoveryManager rm(bpm, *catalog, lm);
     EXPECT_TRUE(rm.recover());
+
+    static_cast<void>(std::remove(log_file.c_str()));
 }
 
 }  // namespace
-
-int main() {
-    std::cout << "Recovery Manager Unit Tests\n";
-    std::cout << "===========================\n";
-
-    RUN_TEST(RecoveryManager_Basic);
-
-    std::cout << "\nResults: \n" << tests_passed << " passed, \n" << tests_failed << " failed\n";
-    return (tests_failed > 0);
-}
