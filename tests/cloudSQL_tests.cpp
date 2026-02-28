@@ -45,7 +45,7 @@ constexpr double PI_UPPER = 3.15;
 constexpr int64_t VAL_1 = 1;
 constexpr int64_t VAL_2 = 2;
 constexpr int64_t VAL_10 = 10;
-
+constexpr int64_t VAL_20 = 20;
 constexpr int64_t VAL_25 = 25;
 constexpr uint64_t STATS_100 = 100;
 constexpr uint16_t PORT_5432 = 5432;

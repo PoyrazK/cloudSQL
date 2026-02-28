@@ -6,13 +6,16 @@
 #include "transaction/transaction_manager.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <utility>
 
 #include "catalog/catalog.hpp"
+#include "executor/types.hpp"
 #include "recovery/log_manager.hpp"
 #include "recovery/log_record.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"
@@ -78,7 +81,7 @@ void TransactionManager::commit(Transaction* txn) {
         completed_transactions_.push_back(std::move(active_transactions_[txn->get_id()]));
         static_cast<void>(active_transactions_.erase(txn->get_id()));
 
-        constexpr size_t MAX_COMPLETED = 100;
+        constexpr std::size_t MAX_COMPLETED = 100;
         if (completed_transactions_.size() > MAX_COMPLETED) {
             completed_transactions_.pop_front();
         }
@@ -113,7 +116,7 @@ void TransactionManager::abort(Transaction* txn) {
         completed_transactions_.push_back(std::move(active_transactions_[txn->get_id()]));
         static_cast<void>(active_transactions_.erase(txn->get_id()));
 
-        constexpr size_t MAX_COMPLETED = 100;
+        constexpr std::size_t MAX_COMPLETED = 100;
         if (completed_transactions_.size() > MAX_COMPLETED) {
             completed_transactions_.pop_front();
         }

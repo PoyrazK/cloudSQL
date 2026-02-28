@@ -360,13 +360,13 @@ void Server::handle_connection(int client_fd) {
                         // Row Description (T)
                         if (!res.rows().empty() && res.schema().column_count() > 0) {
                             const auto& schema = res.schema();
-                            const uint32_t num_cols = static_cast<uint32_t>(schema.column_count());
+                            const auto num_cols = static_cast<uint32_t>(schema.column_count());
 
                             // Calculate T packet length
                             uint32_t t_len = 4 + 2;  // len + num_cols
                             for (uint32_t i = 0; i < num_cols; ++i) {
-                                t_len +=
-                                    schema.get_column(i).name().size() + 1 + 4 + 2 + 4 + 2 + 4 + 2;
+                                t_len += static_cast<uint32_t>(schema.get_column(i).name().size()) +
+                                         1 + 4 + 2 + 4 + 2 + 4 + 2;
                             }
 
                             const char t_type = 'T';
