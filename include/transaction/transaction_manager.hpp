@@ -11,16 +11,12 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
+#include "catalog/catalog.hpp"
+#include "storage/buffer_pool_manager.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"
-
-namespace cloudsql {
-class Catalog;
-namespace storage {
-class BufferPoolManager;
-}
-}  // namespace cloudsql
 
 namespace cloudsql::transaction {
 
@@ -29,7 +25,8 @@ namespace cloudsql::transaction {
  */
 class TransactionManager {
    public:
-    explicit TransactionManager(LockManager& lock_manager,
+    explicit TransactionManager(LockManager& lock_manager, Catalog& catalog,
+                                storage::BufferPoolManager& bpm,
                                 recovery::LogManager* log_manager = nullptr);
 
     ~TransactionManager() = default;
@@ -64,6 +61,8 @@ class TransactionManager {
 
    private:
     LockManager& lock_manager_;
+    Catalog& catalog_;
+    storage::BufferPoolManager& bpm_;
     recovery::LogManager* log_manager_;
 
     std::atomic<txn_id_t> next_txn_id_{1};
@@ -74,6 +73,11 @@ class TransactionManager {
 
     // Transactions that have recently finished (for cleanup/safety)
     std::deque<std::unique_ptr<Transaction>> completed_transactions_;
+
+    /**
+     * @brief Undo changes made by a transaction
+     */
+    void undo_transaction(Transaction* txn);
 };
 
 }  // namespace cloudsql::transaction

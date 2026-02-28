@@ -101,7 +101,7 @@ TEST(RecoveryTests, LogRecordAllTypes) {
 
     const LogRecord deserialized = LogRecord::deserialize(buffer.data());
 
-    ASSERT_EQ(deserialized.tuple_.size(), 7u);
+    ASSERT_EQ(deserialized.tuple_.size(), 7U);
     EXPECT_TRUE(deserialized.tuple_.get(0).as_bool());
     EXPECT_EQ(deserialized.tuple_.get(1).as_int8(), INT8_10);
     EXPECT_EQ(deserialized.tuple_.get(2).as_int16(), INT16_200);

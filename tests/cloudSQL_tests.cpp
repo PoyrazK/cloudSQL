@@ -18,9 +18,11 @@
 #include "common/value.hpp"
 #include "executor/query_executor.hpp"
 #include "executor/types.hpp"
+#include "parser/expression.hpp"
 #include "parser/lexer.hpp"
 #include "parser/parser.hpp"
 #include "parser/statement.hpp"
+#include "parser/token.hpp"
 #include "storage/btree_index.hpp"
 #include "storage/buffer_pool_manager.hpp"
 #include "storage/heap_table.hpp"
@@ -41,6 +43,7 @@ constexpr int64_t VAL_42 = 42;
 constexpr double PI_LOWER = 3.14;
 constexpr double PI_UPPER = 3.15;
 constexpr int64_t VAL_10 = 10;
+constexpr int64_t VAL_20 = 20;
 constexpr int64_t VAL_25 = 25;
 constexpr uint64_t STATS_100 = 100;
 constexpr uint16_t PORT_5432 = 5432;
@@ -190,6 +193,7 @@ TEST(CloudSQLTests, StoragePersistence) {
         HeapTable table(filename, sm, schema);
         static_cast<void>(table.create());
         static_cast<void>(table.insert(Tuple({Value::make_text("Persistent data")})));
+        sm.flush_all_pages();
     }
     {
         StorageManager disk_manager("./test_data");
@@ -237,10 +241,10 @@ TEST(IndexTests, BTreeBasic) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     BTreeIndex idx("idx_test", sm, ValueType::TYPE_INT64);
     static_cast<void>(idx.create());
-    static_cast<void>(idx.insert(Value::make_int64(10), HeapTable::TupleId(1, 1)));
-    static_cast<void>(idx.insert(Value::make_int64(20), HeapTable::TupleId(1, 2)));
-    static_cast<void>(idx.insert(Value::make_int64(10), HeapTable::TupleId(2, 1)));
-    const auto res = idx.search(Value::make_int64(10));
+    static_cast<void>(idx.insert(Value::make_int64(VAL_10), HeapTable::TupleId(1, 1)));
+    static_cast<void>(idx.insert(Value::make_int64(VAL_20), HeapTable::TupleId(1, 2)));
+    static_cast<void>(idx.insert(Value::make_int64(VAL_10), HeapTable::TupleId(2, 1)));
+    const auto res = idx.search(Value::make_int64(VAL_10));
     EXPECT_EQ(res.size(), 2U);
     static_cast<void>(idx.drop());
 }
@@ -272,7 +276,7 @@ TEST(ExecutionTests, EndToEnd) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     {
@@ -304,7 +308,7 @@ TEST(ExecutionTests, Sort) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(exec.execute(
@@ -329,7 +333,7 @@ TEST(ExecutionTests, Aggregate) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(
@@ -362,7 +366,7 @@ TEST(ExecutionTests, AggregateAdvanced) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(exec.execute(
@@ -389,7 +393,7 @@ TEST(ExecutionTests, AggregateDistinct) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(exec.execute(
@@ -417,7 +421,7 @@ TEST(ExecutionTests, Transaction) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
 
     QueryExecutor qexec1(*catalog, sm, lm, tm);
     static_cast<void>(
@@ -449,7 +453,7 @@ TEST(ExecutionTests, Rollback) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(
@@ -479,7 +483,7 @@ TEST(ExecutionTests, UpdateDelete) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(
@@ -518,7 +522,7 @@ TEST(ExecutionTests, MVCC) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
 
     QueryExecutor qexec1(*catalog, sm, lm, tm);
     static_cast<void>(qexec1.execute(
@@ -562,7 +566,7 @@ TEST(ExecutionTests, Join) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(
@@ -606,7 +610,7 @@ TEST(ExecutionTests, DDL) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     /* 1. Create and then Drop Table */
@@ -664,7 +668,7 @@ TEST(ExecutionTests, Expressions) {
     BufferPoolManager sm(cloudsql::config::Config::DEFAULT_BUFFER_POOL_SIZE, disk_manager);
     auto catalog = Catalog::create();
     LockManager lm;
-    TransactionManager tm(lm, sm.get_log_manager());
+    TransactionManager tm(lm, *catalog, sm, sm.get_log_manager());
     QueryExecutor exec(*catalog, sm, lm, tm);
 
     static_cast<void>(exec.execute(
@@ -680,13 +684,13 @@ TEST(ExecutionTests, Expressions) {
         const auto res = exec.execute(
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NULL"))
                  .parse_statement());
-        ASSERT_EQ(res.row_count(), 1u);
+        ASSERT_EQ(res.row_count(), 1U);
         EXPECT_EQ(res.rows()[0].get(0).to_int64(), 2);
 
         const auto res2 = exec.execute(
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE val IS NOT NULL"))
                  .parse_statement());
-        EXPECT_EQ(res2.row_count(), 2u);
+        EXPECT_EQ(res2.row_count(), 2U);
     }
 
     /* 2. Test IN / NOT IN */
@@ -694,12 +698,12 @@ TEST(ExecutionTests, Expressions) {
         const auto res = exec.execute(
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE id IN (1, 3)"))
                  .parse_statement());
-        EXPECT_EQ(res.row_count(), 2u);
+        EXPECT_EQ(res.row_count(), 2U);
 
         const auto res2 = exec.execute(
             *Parser(std::make_unique<Lexer>("SELECT id FROM expr_test WHERE str NOT IN ('A', 'C')"))
                  .parse_statement());
-        ASSERT_EQ(res2.row_count(), 1u);
+        ASSERT_EQ(res2.row_count(), 1U);
         EXPECT_EQ(res2.rows()[0].get(0).to_int64(), 2);
     }
 
@@ -709,7 +713,7 @@ TEST(ExecutionTests, Expressions) {
             *Parser(std::make_unique<Lexer>(
                         "SELECT id, val * 2 + 10, val / 2, val - 5 FROM expr_test WHERE id = 1"))
                  .parse_statement());
-        ASSERT_EQ(res.row_count(), 1u);
+        ASSERT_EQ(res.row_count(), 1U);
         EXPECT_DOUBLE_EQ(res.rows()[0].get(1).to_float64(), 31.0);
         EXPECT_DOUBLE_EQ(res.rows()[0].get(2).to_float64(), 5.25);
         EXPECT_DOUBLE_EQ(res.rows()[0].get(3).to_float64(), 5.5);

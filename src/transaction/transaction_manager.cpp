@@ -5,6 +5,7 @@
 
 #include "transaction/transaction_manager.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -13,16 +14,33 @@
 #include "recovery/log_record.hpp"
 #include "transaction/lock_manager.hpp"
 #include "transaction/transaction.hpp"
+#include "catalog/catalog.hpp"
+#include "storage/heap_table.hpp"
 
 namespace cloudsql::transaction {
 
-TransactionManager::TransactionManager(LockManager& lock_manager, recovery::LogManager* log_manager)
-    : lock_manager_(lock_manager), log_manager_(log_manager) {}
+TransactionManager::TransactionManager(LockManager& lock_manager, Catalog& catalog,
+                                       storage::BufferPoolManager& bpm,
+                                       recovery::LogManager* log_manager)
+    : lock_manager_(lock_manager), catalog_(catalog), bpm_(bpm), log_manager_(log_manager) {}
 
 Transaction* TransactionManager::begin(IsolationLevel level) {
     const std::scoped_lock<std::mutex> lock(manager_latch_);
     const txn_id_t txn_id = next_txn_id_++;
     auto txn = std::make_unique<Transaction>(txn_id, level);
+    
+    /* Capture Snapshot */
+    TransactionSnapshot snapshot;
+    snapshot.xmax = next_txn_id_.load();
+    snapshot.xmin = snapshot.xmax;
+
+    for (const auto& [id, _] : active_transactions_) {
+        snapshot.active_txns.insert(id);
+        snapshot.xmin = std::min(id, snapshot.xmin);
+    }
+
+    txn->set_snapshot(std::move(snapshot));
+    
     Transaction* const txn_ptr = txn.get();
     active_transactions_[txn_id] = std::move(txn);
 
@@ -68,6 +86,9 @@ void TransactionManager::commit(Transaction* txn) {
 }
 
 void TransactionManager::abort(Transaction* txn) {
+    /* Undo all changes */
+    undo_transaction(txn);
+
     if (log_manager_ != nullptr) {
         recovery::LogRecord record(txn->get_id(), txn->get_prev_lsn(),
                                    recovery::LogRecordType::ABORT);
@@ -95,6 +116,40 @@ void TransactionManager::abort(Transaction* txn) {
         constexpr size_t MAX_COMPLETED = 100;
         if (completed_transactions_.size() > MAX_COMPLETED) {
             completed_transactions_.pop_front();
+        }
+    }
+}
+
+void TransactionManager::undo_transaction(Transaction* txn) {
+    const auto& logs = txn->get_undo_logs();
+    /* Undo in reverse order */
+    for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
+        const auto& log = *it;
+        auto table_meta = catalog_.get_table_by_name(log.table_name);
+        if (!table_meta) {
+            continue;
+        }
+
+        /* Reconstruct schema for HeapTable */
+        executor::Schema schema;
+        for (const auto& col : (*table_meta)->columns) {
+            schema.add_column(col.name, col.type);
+        }
+
+        storage::HeapTable table(log.table_name, bpm_, schema);
+
+        switch (log.type) {
+            case UndoLog::Type::INSERT:
+                static_cast<void>(table.physical_remove(log.rid));
+                break;
+            case UndoLog::Type::DELETE:
+                /* TODO: Implement DELETE undo */
+                static_cast<void>(0);
+                break;
+            case UndoLog::Type::UPDATE:
+                /* TODO: Implement UPDATE undo */
+                static_cast<void>(1);
+                break;
         }
     }
 }

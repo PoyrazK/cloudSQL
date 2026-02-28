@@ -29,31 +29,31 @@ TEST(BufferPoolTests, LRUReplacerBasic) {
     replacer.unpin(1);
     replacer.unpin(2);
     replacer.unpin(3);
-    EXPECT_EQ(replacer.size(), 3u);
+    EXPECT_EQ(replacer.size(), 3U);
 
     EXPECT_TRUE(replacer.victim(&victim_frame));
-    EXPECT_EQ(victim_frame, 1u);
-    EXPECT_EQ(replacer.size(), 2u);
+    EXPECT_EQ(victim_frame, 1U);
+    EXPECT_EQ(replacer.size(), 2U);
 
     replacer.unpin(4);
-    EXPECT_EQ(replacer.size(), 3u);
+    EXPECT_EQ(replacer.size(), 3U);
 
     EXPECT_TRUE(replacer.victim(&victim_frame));
-    EXPECT_EQ(victim_frame, 2u);
-    EXPECT_EQ(replacer.size(), 2u);
+    EXPECT_EQ(victim_frame, 2U);
+    EXPECT_EQ(replacer.size(), 2U);
 
     replacer.pin(3);
-    EXPECT_EQ(replacer.size(), 1u);
+    EXPECT_EQ(replacer.size(), 1U);
 
     replacer.unpin(3);
-    EXPECT_EQ(replacer.size(), 2u);
+    EXPECT_EQ(replacer.size(), 2U);
 
     EXPECT_TRUE(replacer.victim(&victim_frame));
-    EXPECT_EQ(victim_frame, 4u);
+    EXPECT_EQ(victim_frame, 4U);
 
     EXPECT_TRUE(replacer.victim(&victim_frame));
-    EXPECT_EQ(victim_frame, 3u);
-    EXPECT_EQ(replacer.size(), 0u);
+    EXPECT_EQ(victim_frame, 3U);
+    EXPECT_EQ(replacer.size(), 0U);
 
     EXPECT_FALSE(replacer.victim(&victim_frame));
 }
@@ -67,7 +67,7 @@ TEST(BufferPoolTests, BufferPoolManagerBasic) {
     uint32_t page_id0 = 0;
     Page* const page0 = bpm.new_page(file_name, &page_id0);
     ASSERT_NE(page0, nullptr);
-    EXPECT_EQ(page_id0, 0u);
+    EXPECT_EQ(page_id0, 0U);
 
     EXPECT_TRUE(bpm.unpin_page(file_name, page_id0, true));
 

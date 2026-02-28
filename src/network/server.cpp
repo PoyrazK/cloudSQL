@@ -25,6 +25,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "catalog/catalog.hpp"
@@ -42,6 +43,8 @@ namespace {
 
 constexpr size_t HEADER_SIZE = 4;
 constexpr int SELECT_TIMEOUT_SEC = 1;
+constexpr uint32_t PG_SSL_CODE = 80877103;
+constexpr uint32_t PG_STARTUP_CODE = 196608;
 
 /**
  * @brief Simple utility to receive exactly N bytes
@@ -92,8 +95,7 @@ Server::Server(uint16_t port, Catalog& catalog, storage::BufferPoolManager& bpm)
     : port_(port),
       catalog_(catalog),
       bpm_(bpm),
-      lock_manager_(),
-      transaction_manager_(lock_manager_, bpm.get_log_manager()) {}
+      transaction_manager_(lock_manager_, catalog, bpm, bpm.get_log_manager()) {}
 
 std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog,
                                        storage::BufferPoolManager& bpm) {
@@ -296,8 +298,8 @@ void Server::handle_connection(int client_fd) {
         return;
     }
 
-    const uint32_t code = ProtocolReader::read_int32(buffer.data() + HEADER_SIZE);
-    if (code == 80877103) {  // SSL Request
+    uint32_t code = ProtocolReader::read_int32(buffer.data() + HEADER_SIZE);
+    if (code == PG_SSL_CODE) {  // SSL Request
         const char n_response = 'N';
         static_cast<void>(send(client_fd, &n_response, 1, 0));
 
@@ -309,6 +311,12 @@ void Server::handle_connection(int client_fd) {
         }
         len = ProtocolReader::read_int32(buffer.data());
         static_cast<void>(recv_all(client_fd, buffer.data() + HEADER_SIZE, len - HEADER_SIZE));
+        code = ProtocolReader::read_int32(buffer.data() + HEADER_SIZE);
+    }
+
+    if (code != PG_STARTUP_CODE) {
+        static_cast<void>(close(client_fd));
+        return;
     }
 
     // Auth OK
@@ -350,9 +358,64 @@ void Server::handle_connection(int client_fd) {
 
                     if (res.success()) {
                         // Row Description (T)
-                        if (!res.rows().empty()) {
-                            // Simplified: send one RowDescription and then DataRows
-                            // For this prototype, we just send CommandComplete
+                        if (!res.rows().empty() && res.schema().column_count() > 0) {
+                            const auto& schema = res.schema();
+                            const uint32_t num_cols = static_cast<uint32_t>(schema.column_count());
+                            
+                            // Calculate T packet length
+                            uint32_t t_len = 4 + 2; // len + num_cols
+                            for (uint32_t i = 0; i < num_cols; ++i) {
+                                t_len += schema.get_column(i).name().size() + 1 + 4 + 2 + 4 + 2 + 4 + 2;
+                            }
+                            
+                            const char t_type = 'T';
+                            const uint32_t net_t_len = htonl(t_len);
+                            const uint16_t net_num_cols = htons(static_cast<uint16_t>(num_cols));
+                            
+                            static_cast<void>(send(client_fd, &t_type, 1, 0));
+                            static_cast<void>(send(client_fd, &net_t_len, 4, 0));
+                            static_cast<void>(send(client_fd, &net_num_cols, 2, 0));
+                            
+                            for (uint32_t i = 0; i < num_cols; ++i) {
+                                const auto& col = schema.get_column(i);
+                                static_cast<void>(send(client_fd, col.name().c_str(), col.name().size() + 1, 0));
+                                const uint32_t table_oid = 0;
+                                const uint16_t col_attr = 0;
+                                const uint32_t type_oid = htonl(23); // 23 is int4, simplified
+                                const uint16_t type_len = htons(4);
+                                const uint32_t type_mod = htonl(0xFFFFFFFF);
+                                const uint16_t format = 0; // Text format
+                                
+                                static_cast<void>(send(client_fd, &table_oid, 4, 0));
+                                static_cast<void>(send(client_fd, &col_attr, 2, 0));
+                                static_cast<void>(send(client_fd, &type_oid, 4, 0));
+                                static_cast<void>(send(client_fd, &type_len, 2, 0));
+                                static_cast<void>(send(client_fd, &type_mod, 4, 0));
+                                static_cast<void>(send(client_fd, &format, 2, 0));
+                            }
+                            
+                            // Data Rows (D)
+                            for (const auto& row : res.rows()) {
+                                const char d_type = 'D';
+                                uint32_t d_len = 4 + 2; // len + num_cols
+                                std::vector<std::string> str_vals;
+                                for (uint32_t i = 0; i < num_cols; ++i) {
+                                    const std::string s_val = row.get(i).to_string();
+                                    str_vals.push_back(s_val);
+                                    d_len += 4 + static_cast<uint32_t>(s_val.size()); // len + value
+                                }
+                                
+                                const uint32_t net_d_len = htonl(d_len);
+                                static_cast<void>(send(client_fd, &d_type, 1, 0));
+                                static_cast<void>(send(client_fd, &net_d_len, 4, 0));
+                                static_cast<void>(send(client_fd, &net_num_cols, 2, 0));
+                                
+                                for (const auto& s_val : str_vals) {
+                                    const uint32_t val_len = htonl(static_cast<uint32_t>(s_val.size()));
+                                    static_cast<void>(send(client_fd, &val_len, 4, 0));
+                                    static_cast<void>(send(client_fd, s_val.c_str(), s_val.size(), 0));
+                                }
+                            }
                         }
 
                         // Command Complete (C)
