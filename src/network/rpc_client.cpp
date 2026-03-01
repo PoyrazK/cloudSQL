@@ -6,13 +6,18 @@
 #include "network/rpc_client.hpp"
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "network/rpc_message.hpp"
 
 namespace cloudsql::network {
 
@@ -61,12 +66,12 @@ bool RpcClient::call(RpcType type, const std::vector<uint8_t>& payload,
         return false;
     }
 
-    char header_buf[8];
-    if (recv(fd_, header_buf, 8, 0) <= 0) {
+    std::array<char, 8> header_buf{};
+    if (recv(fd_, header_buf.data(), 8, 0) <= 0) {
         return false;
     }
 
-    const RpcHeader resp_header = RpcHeader::decode(header_buf);
+    const RpcHeader resp_header = RpcHeader::decode(header_buf.data());
     response_out.resize(resp_header.payload_len);
     if (resp_header.payload_len > 0) {
         static_cast<void>(recv(fd_, response_out.data(), resp_header.payload_len, 0));

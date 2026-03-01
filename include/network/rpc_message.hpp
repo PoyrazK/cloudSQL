@@ -119,17 +119,19 @@ struct QueryResultsReply {
 
     static QueryResultsReply deserialize(const std::vector<uint8_t>& in) {
         QueryResultsReply reply;
-        if (in.empty()) return reply;
+        if (in.empty()) {
+            return reply;
+        }
 
         reply.success = in[0] != 0;
 
-        uint32_t err_len;
+        uint32_t err_len = 0;
         std::memcpy(&err_len, in.data() + 1, 4);
         if (in.size() >= 5 + err_len) {
             reply.error_msg = std::string(reinterpret_cast<const char*>(in.data() + 5), err_len);
         }
 
-        uint32_t row_count;
+        uint32_t row_count = 0;
         if (in.size() >= 9 + err_len) {
             std::memcpy(&row_count, in.data() + 5 + err_len, 4);
             reply.rows.resize(row_count);  // Placeholders
@@ -137,6 +139,7 @@ struct QueryResultsReply {
 
         return reply;
     }
+
 };
 
 /**

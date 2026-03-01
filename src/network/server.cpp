@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "catalog/catalog.hpp"
+#include "common/config.hpp"
 #include "distributed/distributed_executor.hpp"
 #include "executor/query_executor.hpp"
 #include "executor/types.hpp"
@@ -53,7 +54,7 @@ constexpr uint32_t PG_STARTUP_CODE = 196608;
 ssize_t recv_all(int fd, char* buf, size_t count) {
     size_t total = 0;
     while (total < count) {
-        const ssize_t n = recv(fd, buf + total, static_cast<size_t>(count - total), 0);
+        const ssize_t n = recv(fd, buf + total, count - total, 0);
         if (n <= 0) {
             return n;
         }

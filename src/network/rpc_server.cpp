@@ -5,9 +5,11 @@
 
 #include "network/rpc_server.hpp"
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <cstring>
@@ -15,6 +17,8 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include "network/rpc_message.hpp"
 
 namespace cloudsql::network {
 
@@ -90,14 +94,14 @@ void RpcServer::accept_loop() {
 }
 
 void RpcServer::handle_client(int client_fd) {
-    char header_buf[8];
+    std::array<char, 8> header_buf{};
     while (running_) {
-        const ssize_t n = recv(client_fd, header_buf, 8, 0);
+        const ssize_t n = recv(client_fd, header_buf.data(), 8, 0);
         if (n <= 0) {
             break;
         }
 
-        const RpcHeader header = RpcHeader::decode(header_buf);
+        const RpcHeader header = RpcHeader::decode(header_buf.data());
         std::vector<uint8_t> payload(header.payload_len);
         if (header.payload_len > 0) {
             static_cast<void>(recv(client_fd, payload.data(), header.payload_len, 0));

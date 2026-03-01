@@ -1,9 +1,7 @@
 /**
- /**
-  * @file distributed_executor.hpp
-  * @brief High-level executor for distributed queries
-  */
-
+ * @file distributed_executor.hpp
+ * @brief High-level executor for distributed queries
+ */
 #ifndef SQL_ENGINE_DISTRIBUTED_EXECUTOR_HPP
 #define SQL_ENGINE_DISTRIBUTED_EXECUTOR_HPP
 
