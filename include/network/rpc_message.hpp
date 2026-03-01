@@ -139,7 +139,6 @@ struct QueryResultsReply {
 
         return reply;
     }
-
 };
 
 /**
