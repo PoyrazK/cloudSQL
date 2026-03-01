@@ -18,7 +18,9 @@ namespace cloudsql::network {
 
 RpcClient::RpcClient(const std::string& address, uint16_t port) : address_(address), port_(port) {}
 
-RpcClient::~RpcClient() { disconnect(); }
+RpcClient::~RpcClient() {
+    disconnect();
+}
 
 bool RpcClient::connect() {
     const std::scoped_lock<std::mutex> lock(mutex_);
@@ -31,7 +33,7 @@ bool RpcClient::connect() {
         return false;
     }
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port_);
     static_cast<void>(inet_pton(AF_INET, address_.c_str(), &addr.sin_addr));

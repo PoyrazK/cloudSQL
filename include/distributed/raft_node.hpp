@@ -42,8 +42,8 @@ class RaftNode {
     // Raft RPC Handlers
     void handle_request_vote(const network::RpcHeader& header, const std::vector<uint8_t>& payload,
                              int client_fd);
-    void handle_append_entries(const network::RpcHeader& header, const std::vector<uint8_t>& payload,
-                               int client_fd);
+    void handle_append_entries(const network::RpcHeader& header,
+                               const std::vector<uint8_t>& payload, int client_fd);
 
     // Client interface
     bool replicate(const std::string& command);

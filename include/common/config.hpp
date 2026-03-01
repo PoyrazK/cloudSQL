@@ -15,9 +15,9 @@ namespace cloudsql::config {
  * @brief Run modes for the database engine
  */
 enum class RunMode : uint8_t {
-    Standalone = 0,   /**< Single process mode (legacy Embedded) */
-    Coordinator = 1,  /**< Distributed coordinator node */
-    Data = 2          /**< Distributed data storage node */
+    Standalone = 0,  /**< Single process mode (legacy Embedded) */
+    Coordinator = 1, /**< Distributed coordinator node */
+    Data = 2         /**< Distributed data storage node */
 };
 
 /**

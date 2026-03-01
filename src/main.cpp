@@ -72,7 +72,8 @@ void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n\n";
     std::cout << "Options:\n";
     std::cout << "  -p, --port PORT           PostgreSQL client port (default: 5432)\n";
-    std::cout << "  -cp, --cluster-port PORT  Internal cluster communication port (default: 6432)\n";
+    std::cout
+        << "  -cp, --cluster-port PORT  Internal cluster communication port (default: 6432)\n";
     std::cout << "  -d, --data DIR            Data directory (default: ./data)\n";
     std::cout << "  -c, --config FILE         Configuration file (optional)\n";
     std::cout << "  -m, --mode MODE           Run mode: standalone, coordinator, or data\n";
@@ -212,7 +213,7 @@ int main(int argc, char* argv[]) {
         /* Initialize transaction management */
         cloudsql::transaction::LockManager lock_manager;
         cloudsql::transaction::TransactionManager transaction_manager(lock_manager, *catalog, *bpm,
-                                                                       log_manager.get());
+                                                                      log_manager.get());
 
         std::unique_ptr<cloudsql::network::RpcServer> rpc_server = nullptr;
         std::unique_ptr<cloudsql::cluster::ClusterManager> cluster_manager = nullptr;
@@ -237,8 +238,8 @@ int main(int argc, char* argv[]) {
                             cloudsql::parser::Parser parser(std::move(lexer));
                             auto stmt = parser.parse_statement();
                             if (stmt) {
-                                cloudsql::executor::QueryExecutor exec(
-                                    *catalog, *bpm, lock_manager, transaction_manager);
+                                cloudsql::executor::QueryExecutor exec(*catalog, *bpm, lock_manager,
+                                                                       transaction_manager);
                                 auto res = exec.execute(*stmt);
                                 reply.success = res.success();
                                 if (res.success()) {
@@ -388,7 +389,7 @@ int main(int argc, char* argv[]) {
                 std::cout << "Coordinator node joining cluster...\n";
                 const std::string node_id = "node_" + std::to_string(config.cluster_port);
                 raft_node = std::make_unique<cloudsql::raft::RaftNode>(node_id, *cluster_manager,
-                                                                      *rpc_server);
+                                                                       *rpc_server);
 
                 /* Step 4: Link Catalog to RaftNode */
                 catalog->set_raft_node(raft_node.get());

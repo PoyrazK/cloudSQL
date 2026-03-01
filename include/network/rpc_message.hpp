@@ -7,6 +7,7 @@
 #define SQL_ENGINE_NETWORK_RPC_MESSAGE_HPP
 
 #include <arpa/inet.h>
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -97,43 +98,43 @@ struct QueryResultsReply {
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;
         out.push_back(success ? 1 : 0);
-        
+
         uint32_t err_len = static_cast<uint32_t>(error_msg.size());
         size_t offset = out.size();
         out.resize(offset + 4 + err_len);
         std::memcpy(out.data() + offset, &err_len, 4);
         std::memcpy(out.data() + offset + 4, error_msg.data(), err_len);
-        
+
         // Simplified row count serialization
         uint32_t row_count = static_cast<uint32_t>(rows.size());
         offset = out.size();
         out.resize(offset + 4);
         std::memcpy(out.data() + offset, &row_count, 4);
-        
+
         // In a real implementation, we'd serialize each tuple's values here.
         // For Phase 4 POC, we'll return row counts.
-        
+
         return out;
     }
 
     static QueryResultsReply deserialize(const std::vector<uint8_t>& in) {
         QueryResultsReply reply;
         if (in.empty()) return reply;
-        
+
         reply.success = in[0] != 0;
-        
+
         uint32_t err_len;
         std::memcpy(&err_len, in.data() + 1, 4);
         if (in.size() >= 5 + err_len) {
             reply.error_msg = std::string(reinterpret_cast<const char*>(in.data() + 5), err_len);
         }
-        
+
         uint32_t row_count;
         if (in.size() >= 9 + err_len) {
             std::memcpy(&row_count, in.data() + 5 + err_len, 4);
-            reply.rows.resize(row_count); // Placeholders
+            reply.rows.resize(row_count);  // Placeholders
         }
-        
+
         return reply;
     }
 };

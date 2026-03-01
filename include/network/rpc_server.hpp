@@ -6,13 +6,14 @@
 #ifndef SQL_ENGINE_NETWORK_RPC_SERVER_HPP
 #define SQL_ENGINE_NETWORK_RPC_SERVER_HPP
 
+#include <netinet/in.h>
+
 #include <atomic>
 #include <functional>
 #include <mutex>
 #include <thread>
-#include <vector>
-#include <netinet/in.h>
 #include <unordered_map>
+#include <vector>
 
 #include "network/rpc_message.hpp"
 
@@ -63,6 +64,6 @@ class RpcServer {
     std::mutex handlers_mutex_;
 };
 
-} // namespace cloudsql::network
+}  // namespace cloudsql::network
 
-#endif // SQL_ENGINE_NETWORK_RPC_SERVER_HPP
+#endif  // SQL_ENGINE_NETWORK_RPC_SERVER_HPP

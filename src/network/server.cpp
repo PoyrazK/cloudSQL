@@ -102,8 +102,8 @@ Server::Server(uint16_t port, Catalog& catalog, storage::BufferPoolManager& bpm,
       transaction_manager_(lock_manager_, catalog, bpm, bpm.get_log_manager()) {}
 
 std::unique_ptr<Server> Server::create(uint16_t port, Catalog& catalog,
-                                       storage::BufferPoolManager& bpm, const config::Config& config,
-                                       cluster::ClusterManager* cm) {
+                                       storage::BufferPoolManager& bpm,
+                                       const config::Config& config, cluster::ClusterManager* cm) {
     return std::make_unique<Server>(port, catalog, bpm, config, cm);
 }
 
@@ -119,7 +119,7 @@ bool Server::start() {
         return false;
     }
 
-    struct sockaddr_in addr {};
+    struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
@@ -258,16 +258,14 @@ void Server::accept_connections() {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
-        struct timeval timeout {
-            SELECT_TIMEOUT_SEC, 0
-        };
+        struct timeval timeout{SELECT_TIMEOUT_SEC, 0};
 
         const int res = select(fd + 1, &read_fds, nullptr, nullptr, &timeout);
         if (res <= 0) {
             continue;
         }
 
-        struct sockaddr_in client_addr {};
+        struct sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         const int client_fd =
             accept(fd, reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
@@ -358,7 +356,8 @@ void Server::handle_connection(int client_fd) {
 
                 if (stmt) {
                     executor::QueryResult res;
-                    if (config_.mode == config::RunMode::Coordinator && cluster_manager_ != nullptr) {
+                    if (config_.mode == config::RunMode::Coordinator &&
+                        cluster_manager_ != nullptr) {
                         executor::DistributedExecutor dist_exec(catalog_, *cluster_manager_);
                         res = dist_exec.execute(*stmt, sql);
                     } else {

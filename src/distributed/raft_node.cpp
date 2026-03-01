@@ -35,23 +35,21 @@ RaftNode::RaftNode(std::string node_id, cluster::ClusterManager& cluster_manager
     last_heartbeat_ = std::chrono::system_clock::now();
 }
 
-RaftNode::~RaftNode() { stop(); }
+RaftNode::~RaftNode() {
+    stop();
+}
 
 void RaftNode::start() {
     running_ = true;
     raft_thread_ = std::thread(&RaftNode::run_loop, this);
 
     // Register handlers
-    rpc_server_.set_handler(
-        network::RpcType::RequestVote,
-        [this](const network::RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-            handle_request_vote(h, p, fd);
-        });
-    rpc_server_.set_handler(
-        network::RpcType::AppendEntries,
-        [this](const network::RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-            handle_append_entries(h, p, fd);
-        });
+    rpc_server_.set_handler(network::RpcType::RequestVote,
+                            [this](const network::RpcHeader& h, const std::vector<uint8_t>& p,
+                                   int fd) { handle_request_vote(h, p, fd); });
+    rpc_server_.set_handler(network::RpcType::AppendEntries,
+                            [this](const network::RpcHeader& h, const std::vector<uint8_t>& p,
+                                   int fd) { handle_append_entries(h, p, fd); });
 }
 
 void RaftNode::stop() {

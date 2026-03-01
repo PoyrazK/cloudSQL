@@ -6,9 +6,9 @@
 #ifndef SQL_ENGINE_NETWORK_RPC_CLIENT_HPP
 #define SQL_ENGINE_NETWORK_RPC_CLIENT_HPP
 
+#include <mutex>
 #include <string>
 #include <vector>
-#include <mutex>
 
 #include "network/rpc_message.hpp"
 
@@ -29,7 +29,8 @@ class RpcClient {
     /**
      * @brief Send a request and wait for a response
      */
-    bool call(RpcType type, const std::vector<uint8_t>& payload, std::vector<uint8_t>& response_out);
+    bool call(RpcType type, const std::vector<uint8_t>& payload,
+              std::vector<uint8_t>& response_out);
 
     /**
      * @brief Send a request without waiting for a response
@@ -43,6 +44,6 @@ class RpcClient {
     mutable std::mutex mutex_;
 };
 
-} // namespace cloudsql::network
+}  // namespace cloudsql::network
 
-#endif // SQL_ENGINE_NETWORK_RPC_CLIENT_HPP
+#endif  // SQL_ENGINE_NETWORK_RPC_CLIENT_HPP

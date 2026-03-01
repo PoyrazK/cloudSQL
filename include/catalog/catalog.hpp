@@ -86,7 +86,7 @@ struct TableInfo {
     std::string name;
     std::vector<ColumnInfo> columns;
     std::vector<IndexInfo> indexes;
-    std::vector<ShardInfo> shards; // New: Shard mapping
+    std::vector<ShardInfo> shards;  // New: Shard mapping
     uint64_t num_rows = 0;
     std::string filename;
     uint32_t flags = 0;

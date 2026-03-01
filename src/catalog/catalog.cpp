@@ -95,7 +95,7 @@ oid_t Catalog::create_table_local(const std::string& table_name, std::vector<Col
     /* Basic Shard Assignment */
     ShardInfo shard;
     shard.shard_id = 0;
-    shard.node_address = "127.0.0.1"; // Default
+    shard.node_address = "127.0.0.1";  // Default
     shard.port = 6432;
     table->shards.push_back(shard);
 
@@ -294,4 +294,3 @@ uint64_t Catalog::get_current_time() {
 
 /** @} */ /* catalog */
 }  // namespace cloudsql
-

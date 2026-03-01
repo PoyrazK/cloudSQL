@@ -5,10 +5,10 @@
 
 #include "distributed/distributed_executor.hpp"
 
-#include <iostream>
 #include <future>
-#include <vector>
+#include <iostream>
 #include <string>
+#include <vector>
 
 #include "catalog/catalog.hpp"
 #include "common/cluster_manager.hpp"
@@ -25,8 +25,8 @@ DistributedExecutor::DistributedExecutor(Catalog& catalog, cluster::ClusterManag
 
 QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                                          const std::string& raw_sql) {
-    (void)catalog_; // Suppress unused warning
-    
+    (void)catalog_;  // Suppress unused warning
+
     // 1. Check if it's a DDL (Catalog) operation
     const auto type = stmt.type();
     if (type == parser::StmtType::CreateTable || type == parser::StmtType::DropTable ||
@@ -64,7 +64,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     if (client.call(network::RpcType::TxnPrepare, payload, resp_payload)) {
                         auto reply = network::QueryResultsReply::deserialize(resp_payload);
                         if (reply.success) return std::make_pair(true, std::string(""));
-                        return std::make_pair(false, "[" + node.id + "] Prepare failed: " + reply.error_msg);
+                        return std::make_pair(
+                            false, "[" + node.id + "] Prepare failed: " + reply.error_msg);
                     }
                     return std::make_pair(false, "[" + node.id + "] RPC failed during prepare");
                 }
@@ -84,16 +85,17 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         // Phase 2: Commit or Abort (Parallel)
         const auto phase2_type =
             all_prepared ? network::RpcType::TxnCommit : network::RpcType::TxnAbort;
-        
+
         std::vector<std::future<void>> phase2_futures;
         for (const auto& node : data_nodes) {
-            phase2_futures.push_back(std::async(std::launch::async, [&node, payload, phase2_type]() {
-                network::RpcClient client(node.address, node.cluster_port);
-                if (client.connect()) {
-                    std::vector<uint8_t> resp_payload;
-                    static_cast<void>(client.call(phase2_type, payload, resp_payload));
-                }
-            }));
+            phase2_futures.push_back(
+                std::async(std::launch::async, [&node, payload, phase2_type]() {
+                    network::RpcClient client(node.address, node.cluster_port);
+                    if (client.connect()) {
+                        std::vector<uint8_t> resp_payload;
+                        static_cast<void>(client.call(phase2_type, payload, resp_payload));
+                    }
+                }));
         }
         for (auto& f : phase2_futures) f.get();
 
@@ -116,7 +118,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 network::RpcClient client(node.address, node.cluster_port);
                 if (client.connect()) {
                     std::vector<uint8_t> resp_payload;
-                    static_cast<void>(client.call(network::RpcType::TxnAbort, payload, resp_payload));
+                    static_cast<void>(
+                        client.call(network::RpcType::TxnAbort, payload, resp_payload));
                 }
             }));
         }
@@ -137,8 +140,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 if (const_expr) {
                     common::Value pk_val = const_expr->value();
 
-                    uint32_t shard_idx =
-                        cluster::ShardManager::compute_shard(pk_val, static_cast<uint32_t>(data_nodes.size()));
+                    uint32_t shard_idx = cluster::ShardManager::compute_shard(
+                        pk_val, static_cast<uint32_t>(data_nodes.size()));
                     target_nodes.push_back(data_nodes[shard_idx]);
                 }
             }

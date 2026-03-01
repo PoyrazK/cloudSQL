@@ -25,7 +25,7 @@ class ShardManager {
      */
     static uint32_t compute_shard(const common::Value& pk_value, uint32_t num_shards) {
         if (num_shards == 0) return 0;
-        
+
         // Simple hash for demo purposes
         std::string s = pk_value.to_string();
         size_t hash = std::hash<std::string>{}(s);
@@ -45,6 +45,6 @@ class ShardManager {
     }
 };
 
-} // namespace cloudsql::cluster
+}  // namespace cloudsql::cluster
 
-#endif // SQL_ENGINE_DISTRIBUTED_SHARD_MANAGER_HPP
+#endif  // SQL_ENGINE_DISTRIBUTED_SHARD_MANAGER_HPP
