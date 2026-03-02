@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -67,14 +68,16 @@ bool RpcClient::call(RpcType type, const std::vector<uint8_t>& payload,
     }
 
     std::array<char, 8> header_buf{};
-    if (recv(fd_, header_buf.data(), 8, 0) <= 0) {
+    if (recv(fd_, header_buf.data(), 8, MSG_WAITALL) <= 0) {
         return false;
     }
 
     const RpcHeader resp_header = RpcHeader::decode(header_buf.data());
     response_out.resize(resp_header.payload_len);
     if (resp_header.payload_len > 0) {
-        static_cast<void>(recv(fd_, response_out.data(), resp_header.payload_len, 0));
+        if (recv(fd_, response_out.data(), resp_header.payload_len, MSG_WAITALL) <= 0) {
+            return false;
+        }
     }
 
     return true;

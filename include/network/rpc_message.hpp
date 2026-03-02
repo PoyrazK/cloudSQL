@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "common/value.hpp"
 #include "executor/types.hpp"
 
 namespace cloudsql::network {
@@ -30,7 +31,106 @@ enum class RpcType : uint8_t {
     TxnPrepare = 6,
     TxnCommit = 7,
     TxnAbort = 8,
+    PushData = 9,
     Error = 255
+};
+
+/**
+ * @brief Serialization utilities for Common types
+ */
+class Serializer {
+   public:
+    static constexpr size_t VAL_SIZE_64 = 8;
+    static constexpr size_t VAL_SIZE_32 = 4;
+
+    static void serialize_value(const common::Value& val, std::vector<uint8_t>& out) {
+        auto type = static_cast<uint8_t>(val.type());
+        out.push_back(type);
+        if (val.is_null()) {
+            return;
+        }
+
+        switch (val.type()) {
+            case common::ValueType::TYPE_INT64: {
+                int64_t v = val.as_int64();
+                const size_t offset = out.size();
+                out.resize(offset + VAL_SIZE_64);
+                std::memcpy(out.data() + offset, &v, VAL_SIZE_64);
+                break;
+            }
+            case common::ValueType::TYPE_TEXT: {
+                const std::string& s = val.as_text();
+                const auto len = static_cast<uint32_t>(s.size());
+                const size_t offset = out.size();
+                out.resize(offset + VAL_SIZE_32 + len);
+                std::memcpy(out.data() + offset, &len, VAL_SIZE_32);
+                std::memcpy(out.data() + offset + VAL_SIZE_32, s.data(), len);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    static common::Value deserialize_value(const uint8_t* data, size_t& offset, size_t size) {
+        if (offset >= size) {
+            return common::Value::make_null();
+        }
+        auto type = static_cast<common::ValueType>(data[offset++]);
+        if (type == common::ValueType::TYPE_NULL) {
+            return common::Value::make_null();
+        }
+
+        switch (type) {
+            case common::ValueType::TYPE_INT64: {
+                int64_t v = 0;
+                if (offset + VAL_SIZE_64 <= size) {
+                    std::memcpy(&v, data + offset, VAL_SIZE_64);
+                    offset += VAL_SIZE_64;
+                }
+                return common::Value::make_int64(v);
+            }
+            case common::ValueType::TYPE_TEXT: {
+                uint32_t len = 0;
+                if (offset + VAL_SIZE_32 <= size) {
+                    std::memcpy(&len, data + offset, VAL_SIZE_32);
+                    offset += VAL_SIZE_32;
+                }
+                std::string s;
+                if (offset + len <= size) {
+                    s = std::string(reinterpret_cast<const char*>(data + offset), len);
+                    offset += len;
+                }
+                return common::Value::make_text(s);
+            }
+            default:
+                return common::Value::make_null();
+        }
+    }
+
+    static void serialize_tuple(const executor::Tuple& tuple, std::vector<uint8_t>& out) {
+        const auto count = static_cast<uint32_t>(tuple.size());
+        const size_t offset = out.size();
+        out.resize(offset + VAL_SIZE_32);
+        std::memcpy(out.data() + offset, &count, VAL_SIZE_32);
+        for (size_t i = 0; i < count; ++i) {
+            serialize_value(tuple.get(i), out);
+        }
+    }
+
+    static executor::Tuple deserialize_tuple(const uint8_t* data, size_t& offset, size_t size) {
+        uint32_t count = 0;
+        if (offset + VAL_SIZE_32 <= size) {
+            std::memcpy(&count, data + offset, VAL_SIZE_32);
+            offset += VAL_SIZE_32;
+        }
+        std::vector<common::Value> values;
+        values.reserve(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            values.push_back(deserialize_value(data, offset, size));
+        }
+        return executor::Tuple(std::move(values));
+    }
 };
 
 /**
@@ -99,20 +199,20 @@ struct QueryResultsReply {
         std::vector<uint8_t> out;
         out.push_back(success ? 1 : 0);
 
-        uint32_t err_len = static_cast<uint32_t>(error_msg.size());
+        const auto err_len = static_cast<uint32_t>(error_msg.size());
         size_t offset = out.size();
         out.resize(offset + 4 + err_len);
         std::memcpy(out.data() + offset, &err_len, 4);
         std::memcpy(out.data() + offset + 4, error_msg.data(), err_len);
 
-        // Simplified row count serialization
-        uint32_t row_count = static_cast<uint32_t>(rows.size());
+        const auto row_count = static_cast<uint32_t>(rows.size());
         offset = out.size();
         out.resize(offset + 4);
         std::memcpy(out.data() + offset, &row_count, 4);
 
-        // In a real implementation, we'd serialize each tuple's values here.
-        // For Phase 4 POC, we'll return row counts.
+        for (const auto& row : rows) {
+            Serializer::serialize_tuple(row, out);
+        }
 
         return out;
     }
@@ -125,19 +225,76 @@ struct QueryResultsReply {
 
         reply.success = in[0] != 0;
 
+        size_t offset = 1;
         uint32_t err_len = 0;
-        std::memcpy(&err_len, in.data() + 1, 4);
-        if (in.size() >= 5 + err_len) {
-            reply.error_msg = std::string(reinterpret_cast<const char*>(in.data() + 5), err_len);
+        if (offset + 4 <= in.size()) {
+            std::memcpy(&err_len, in.data() + offset, 4);
+            offset += 4;
+        }
+        if (in.size() >= offset + err_len) {
+            reply.error_msg = std::string(reinterpret_cast<const char*>(in.data() + offset), err_len);
+            offset += err_len;
         }
 
         uint32_t row_count = 0;
-        if (in.size() >= 9 + err_len) {
-            std::memcpy(&row_count, in.data() + 5 + err_len, 4);
-            reply.rows.resize(row_count);  // Placeholders
+        if (offset + 4 <= in.size()) {
+            std::memcpy(&row_count, in.data() + offset, 4);
+            offset += 4;
+        }
+        for (uint32_t i = 0; i < row_count; ++i) {
+            reply.rows.push_back(Serializer::deserialize_tuple(in.data(), offset, in.size()));
         }
 
         return reply;
+    }
+};
+
+/**
+ * @brief Payload for pushing data between nodes (Shuffle)
+ */
+struct PushDataArgs {
+    std::string table_name;
+    std::vector<executor::Tuple> rows;
+
+    [[nodiscard]] std::vector<uint8_t> serialize() const {
+        std::vector<uint8_t> out;
+        const auto name_len = static_cast<uint32_t>(table_name.size());
+        out.resize(4 + name_len);
+        std::memcpy(out.data(), &name_len, 4);
+        std::memcpy(out.data() + 4, table_name.data(), name_len);
+
+        const auto row_count = static_cast<uint32_t>(rows.size());
+        const size_t offset = out.size();
+        out.resize(offset + 4);
+        std::memcpy(out.data() + offset, &row_count, 4);
+        for (const auto& row : rows) {
+            Serializer::serialize_tuple(row, out);
+        }
+        return out;
+    }
+
+    static PushDataArgs deserialize(const std::vector<uint8_t>& in) {
+        PushDataArgs args;
+        if (in.size() < 4) {
+            return args;
+        }
+        uint32_t name_len = 0;
+        size_t offset = 0;
+        std::memcpy(&name_len, in.data() + offset, 4);
+        offset += 4;
+        if (in.size() >= offset + name_len) {
+            args.table_name = std::string(reinterpret_cast<const char*>(in.data() + offset), name_len);
+            offset += name_len;
+        }
+        uint32_t row_count = 0;
+        if (offset + 4 <= in.size()) {
+            std::memcpy(&row_count, in.data() + offset, 4);
+            offset += 4;
+        }
+        for (uint32_t i = 0; i < row_count; ++i) {
+            args.rows.push_back(Serializer::deserialize_tuple(in.data(), offset, in.size()));
+        }
+        return args;
     }
 };
 
