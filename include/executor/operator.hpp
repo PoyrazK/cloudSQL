@@ -38,7 +38,8 @@ enum class OperatorType : uint8_t {
     HashAggregate,
     Limit,
     Materialize,
-    Result
+    Result,
+    BufferScan
 };
 
 /**
@@ -123,6 +124,29 @@ class SeqScanOperator : public Operator {
     void close() override;
     [[nodiscard]] Schema& output_schema() override;
     [[nodiscard]] const std::string& table_name() const { return table_name_; }
+};
+
+/**
+ * @brief Buffer scan operator (for shuffled/broadcasted data)
+ */
+class BufferScanOperator : public Operator {
+   private:
+    std::string table_name_;
+    std::vector<Tuple> data_;
+    size_t current_index_ = 0;
+    Schema schema_;
+
+   public:
+    BufferScanOperator(std::string table_name, std::vector<Tuple> data, Schema schema);
+
+    bool init() override { return true; }
+    bool open() override {
+        current_index_ = 0;
+        return true;
+    }
+    bool next(Tuple& out_tuple) override;
+    void close() override {}
+    [[nodiscard]] Schema& output_schema() override;
 };
 
 /**
