@@ -199,6 +199,28 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
     // For simplicity, we assume a single active global transaction ID.
     constexpr uint64_t GLOBAL_TXN_ID = 1;
 
+    if (type == parser::StmtType::TransactionRollback) {
+        network::TxnOperationArgs args;
+        args.txn_id = GLOBAL_TXN_ID;
+        auto payload = args.serialize();
+
+        std::vector<std::future<void>> rollback_futures;
+        for (const auto& node : data_nodes) {
+            rollback_futures.push_back(std::async(std::launch::async, [node, payload]() {
+                network::RpcClient client(node.address, node.cluster_port);
+                if (client.connect()) {
+                    std::vector<uint8_t> resp_payload;
+                    static_cast<void>(
+                        client.call(network::RpcType::TxnAbort, payload, resp_payload));
+                }
+            }));
+        }
+        for (auto& f : rollback_futures) {
+            f.get();
+        }
+        return {};
+    }
+
     if (type == parser::StmtType::TransactionCommit) {
         std::string errors;
 
@@ -260,28 +282,6 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         QueryResult res;
         res.set_error("Distributed transaction aborted: " + errors);
         return res;
-    }
-
-    if (type == parser::StmtType::TransactionRollback) {
-        network::TxnOperationArgs args;
-        args.txn_id = GLOBAL_TX_ID;
-        auto payload = args.serialize();
-
-        std::vector<std::future<void>> rollback_futures;
-        for (const auto& node : data_nodes) {
-            rollback_futures.push_back(std::async(std::launch::async, [node, payload]() {
-                network::RpcClient client(node.address, node.cluster_port);
-                if (client.connect()) {
-                    std::vector<uint8_t> resp_payload;
-                    static_cast<void>(
-                        client.call(network::RpcType::TxnAbort, payload, resp_payload));
-                }
-            }));
-        }
-        for (auto& f : rollback_futures) {
-            f.get();
-        }
-        return {};
     }
 
     // 3. Query Analysis for Routing
