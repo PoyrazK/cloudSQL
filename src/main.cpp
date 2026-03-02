@@ -400,11 +400,11 @@ int main(int argc, char* argv[]) {
                                 throw std::runtime_error("Table not found: " + args.table_name);
                             }
                             const auto* table_meta = table_meta_opt.value();
-                            executor::Schema schema;
+                            cloudsql::executor::Schema schema;
                             for (const auto& col : table_meta->columns) {
                                 schema.add_column(col.name, col.type);
                             }
-                            storage::HeapTable table(args.table_name, *bpm, schema);
+                            cloudsql::storage::HeapTable table(args.table_name, *bpm, schema);
 
                             const size_t key_idx = schema.find_column(args.join_key_col);
                             if (key_idx == static_cast<size_t>(-1)) {
@@ -413,11 +413,12 @@ int main(int argc, char* argv[]) {
                             }
 
                             auto data_nodes = cluster_manager->get_data_nodes();
-                            std::unordered_map<std::string, std::vector<executor::Tuple>>
+                            std::unordered_map<std::string,
+                                               std::vector<cloudsql::executor::Tuple>>
                                 partitions;
 
                             auto iter = table.scan();
-                            storage::HeapTable::TupleMeta meta;
+                            cloudsql::storage::HeapTable::TupleMeta meta;
                             while (iter.next_meta(meta)) {
                                 if (meta.xmax == 0) {  // Visible
                                     const auto& key_val = meta.tuple.get(key_idx);
