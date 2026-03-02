@@ -1,29 +1,33 @@
 # cloudSQL
 
-A lightweight, distributed SQL database engine. Designed for cloud environments with a focus on simplicity, type safety, and PostgreSQL compatibility.
+A lightweight, distributed SQL database engine. Designed for cloud environments with a focus on simplicity, type safety, and PostgreSQL compatibility. cloudSQL bridges the gap between single-node databases and complex distributed systems by providing horizontal scaling with a familiar interface.
 
 ## Key Features
 
 - **Modern C++ Architecture**: High-performance, object-oriented codebase using C++17.
-- **Type-Safe Value System**: Robust handling of SQL data types (Integer, Float, Text, Boolean, etc.) using `std::variant`.
-- **Paged Storage Engine**: Efficient page-level random access I/O via a custom `StorageManager`.
-- **Slot-Based Heap Tables**: Optimized row-oriented storage with support for variable-length data.
-- **B+ Tree Indexing**: Fast secondary access paths for point lookups and ordered scans.
-- **SQL Parser**: Powerful recursive descent parser supporting DDL (`CREATE TABLE`) and DML (`INSERT`, `SELECT` with `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`).
-- **Volcano Execution Engine**: Advanced iterator-based execution supporting sequential scans, index scans, filtering, projection, hash joins, sorting, and aggregation.
+- **Distributed Consensus (Raft)**: Global metadata and catalog consistency powered by a custom Raft implementation.
+- **Horizontal Sharding**: Hash-based data partitioning across multiple Data Nodes.
+- **Distributed Query Optimization**: 
+  - **Shard Pruning**: Intelligent routing to avoid cluster-wide broadcasts.
+  - **Aggregation Merging**: Global coordination for `COUNT`, `SUM`, and other aggregates.
+  - **Broadcast Joins**: Optimized cross-shard joins for small-to-large table scenarios.
+- **Multi-Node Transactions**: ACID guarantees across the cluster via Two-Phase Commit (2PC).
+- **Type-Safe Value System**: Robust handling of SQL data types using `std::variant`.
+- **Volcano Execution Engine**: Iterator-based execution supporting sequential scans, index scans, filtering, projection, hash joins, sorting, and aggregation.
 - **PostgreSQL Wire Protocol**: Handshake and simple query protocol implementation for tool compatibility.
 
 ## Project Structure
 
-- `include/`: Header files defining the core engine API.
-- `src/`: Core implementation modules.
+- `include/`: Header files defining the core engine and distributed API.
+- `src/`: implementations modules.
   - `catalog/`: Metadata and schema management.
-  - `common/`: Core types and configuration.
-  - `executor/`: Query operators and execution coordination.
-  - `network/`: PostgreSQL server implementation.
+  - `distributed/`: Raft consensus, shard management, and distributed execution.
+  - `executor/`: Volcano operators and local query coordination.
+  - `network/`: PostgreSQL server and internal cluster RPC.
   - `parser/`: Lexical analysis and SQL parsing.
-  - `storage/`: Paged storage, heap files, and indexes.
-- `tests/`: Comprehensive test suite for reliability and performance.
+  - `storage/`: Paged storage, heap files, and B+ tree indexes.
+- `docs/`: Technical documentation and [Phase-by-Phase Roadmap](./docs/phases/README.md).
+- `tests/`: Comprehensive test suite including simulation-based Raft tests and distributed scenarios.
 
 ## Building and Running
 
@@ -38,39 +42,41 @@ A lightweight, distributed SQL database engine. Designed for cloud environments 
 mkdir build
 cd build
 cmake ..
-make
+make -j$(nproc)
 ```
 
 ### Running Tests
 
 ```bash
+# Run all tests
 ./build/sqlEngine_tests
+# Run distributed-specific tests
+./build/distributed_tests
+./build/distributed_txn_tests
 ```
 
-### Starting the Server
+### Starting the Cluster
 
+Start a Coordinator:
 ```bash
-./build/sqlEngine --port 5432 --data ./data
+./build/sqlEngine --mode coordinator --port 5432 --cluster-port 6432 --data ./coord_data
+```
+
+Start a Data Node:
+```bash
+./build/sqlEngine --mode data --cluster-port 6433 --data ./data_node_1
 ```
 
 ## Core Components
 
-### 1. Value System
-The engine features a unified `Value` class that safely encapsulates SQL types. This ensures data integrity during calculations and data retrieval.
+### 1. Raft Consensus
+Ensures that all Coordinator nodes share an identical view of the database schema and shard mappings. DDL operations are replicated and committed via the Raft log before being applied to the local catalog.
 
-### 2. Execution Operators
-Queries are executed using the Volcano model, allowing for scalable and modular operator trees:
-- `SeqScanOperator`: Scans all tuples in a table.
-- `IndexScanOperator`: Leverages B+ Trees for high-speed lookups.
-- `FilterOperator`: Efficiently filters data based on complex expressions.
-- `ProjectOperator`: Computes results and transforms data columns.
-- `SortOperator`: Handles `ORDER BY` with multiple keys and directions.
-- `AggregateOperator`: Implements `GROUP BY` and aggregate functions (`COUNT`, `SUM`, etc.).
-- `HashJoinOperator`: Performs high-performance in-memory inner joins.
-- `LimitOperator`: Manages result set windowing.
+### 2. Distributed Executor
+Orchestrates query fragments across the cluster. It performs plan splitting, dispatches sub-queries to relevant Data Nodes, and merges partial results (e.g., summing partial counts) before returning the final set to the client.
 
 ### 3. Storage Layer
-Data is persisted in fixed-size pages (default 4KB) using a slot-based layout. The `StorageManager` coordinates access to these pages, ensuring atomic operations and enabling future support for buffer pool management.
+Data is persisted in fixed-size pages (default 4KB) using a slot-based layout. The `StorageManager` coordinates access, while the `BufferPoolManager` provides an LRU-K caching layer to minimize disk I/O.
 
 ## License
 
