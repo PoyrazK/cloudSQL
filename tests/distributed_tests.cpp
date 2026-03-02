@@ -6,6 +6,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -60,17 +61,18 @@ TEST(DistributedExecutorTests, AggregationMerge) {
     // 1. Setup mock shards
     RpcServer node1(7300);
     RpcServer node2(7301);
-    
+
     auto agg_handler = [](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-        (void)h; (void)p;
+        (void)h;
+        (void)p;
         QueryResultsReply reply;
         reply.success = true;
-        
+
         std::vector<common::Value> vals;
-        vals.push_back(common::Value::make_int64(10)); // Each node returns 10
+        vals.push_back(common::Value::make_int64(10));  // Each node returns 10
         executor::Tuple t(std::move(vals));
         reply.rows.push_back(std::move(t));
-        
+
         auto resp_p = reply.serialize();
         RpcHeader resp_h;
         resp_h.type = RpcType::QueryResults;
@@ -112,27 +114,37 @@ TEST(DistributedExecutorTests, AggregationMerge) {
 TEST(DistributedExecutorTests, ShardPruningSelect) {
     RpcServer node1(7400);
     RpcServer node2(7401);
-    
+
     std::atomic<int> n1_calls{0};
     std::atomic<int> n2_calls{0};
 
     auto h1 = [&](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-        (void)h; (void)p; n1_calls++;
-        QueryResultsReply reply; reply.success = true;
+        (void)h;
+        (void)p;
+        n1_calls++;
+        QueryResultsReply reply;
+        reply.success = true;
         auto resp_p = reply.serialize();
-        RpcHeader resp_h; resp_h.type = RpcType::QueryResults;
+        RpcHeader resp_h;
+        resp_h.type = RpcType::QueryResults;
         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-        std::array<char, 8> h_buf{}; resp_h.encode(h_buf.data());
+        std::array<char, 8> h_buf{};
+        resp_h.encode(h_buf.data());
         static_cast<void>(send(fd, h_buf.data(), 8, 0));
         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
     };
     auto h2 = [&](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-        (void)h; (void)p; n2_calls++;
-        QueryResultsReply reply; reply.success = true;
+        (void)h;
+        (void)p;
+        n2_calls++;
+        QueryResultsReply reply;
+        reply.success = true;
         auto resp_p = reply.serialize();
-        RpcHeader resp_h; resp_h.type = RpcType::QueryResults;
+        RpcHeader resp_h;
+        resp_h.type = RpcType::QueryResults;
         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-        std::array<char, 8> h_buf{}; resp_h.encode(h_buf.data());
+        std::array<char, 8> h_buf{};
+        resp_h.encode(h_buf.data());
         static_cast<void>(send(fd, h_buf.data(), 8, 0));
         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
     };
@@ -168,24 +180,25 @@ TEST(DistributedExecutorTests, DataRedistributionShuffle) {
     std::atomic<int> received_rows{0};
     std::string received_table;
 
-    target_node.set_handler(RpcType::PushData, [&](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
-        (void)h;
-        auto args = PushDataArgs::deserialize(p);
-        received_rows += static_cast<int>(args.rows.size());
-        received_table = args.table_name;
+    target_node.set_handler(RpcType::PushData,
+                            [&](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
+                                (void)h;
+                                auto args = PushDataArgs::deserialize(p);
+                                received_rows += static_cast<int>(args.rows.size());
+                                received_table = args.table_name;
 
-        // Send response back to unblock the client
-        QueryResultsReply reply;
-        reply.success = true;
-        auto resp_p = reply.serialize();
-        RpcHeader resp_h;
-        resp_h.type = RpcType::QueryResults;
-        resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-        std::array<char, 8> h_buf{};
-        resp_h.encode(h_buf.data());
-        static_cast<void>(send(fd, h_buf.data(), 8, 0));
-        static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
-    });
+                                // Send response back to unblock the client
+                                QueryResultsReply reply;
+                                reply.success = true;
+                                auto resp_p = reply.serialize();
+                                RpcHeader resp_h;
+                                resp_h.type = RpcType::QueryResults;
+                                resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
+                                std::array<char, 8> h_buf{};
+                                resp_h.encode(h_buf.data());
+                                static_cast<void>(send(fd, h_buf.data(), 8, 0));
+                                static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
+                            });
     ASSERT_TRUE(target_node.start());
 
     // 2. Node A pushes data
@@ -196,8 +209,10 @@ TEST(DistributedExecutorTests, DataRedistributionShuffle) {
 
         PushDataArgs args;
         args.table_name = "users";
-        std::vector<common::Value> vals1; vals1.push_back(common::Value::make_int64(1));
-        std::vector<common::Value> vals2; vals2.push_back(common::Value::make_int64(2));
+        std::vector<common::Value> vals1;
+        vals1.push_back(common::Value::make_int64(1));
+        std::vector<common::Value> vals2;
+        vals2.push_back(common::Value::make_int64(2));
         args.rows.emplace_back(std::move(vals1));
         args.rows.emplace_back(std::move(vals2));
 
@@ -207,7 +222,7 @@ TEST(DistributedExecutorTests, DataRedistributionShuffle) {
         // Verify while client is connected
         EXPECT_EQ(received_rows.load(), 2);
         EXPECT_EQ(received_table, "users");
-        
+
         client.disconnect();
     }
 
@@ -219,13 +234,13 @@ TEST(DistributedExecutorTests, BroadcastJoinOrchestration) {
     // 1. Setup mock shards
     RpcServer node1(7600);
     RpcServer node2(7601);
-    
+
     std::atomic<int> push_calls{0};
-    
+
     auto handler = [&](const RpcHeader& h, const std::vector<uint8_t>& p, int fd) {
         QueryResultsReply reply;
         reply.success = true;
-        
+
         if (h.type == RpcType::ExecuteFragment) {
             auto args = ExecuteFragmentArgs::deserialize(p);
             // If it's the fetch part of broadcast: "SELECT * FROM small_table"
@@ -237,7 +252,7 @@ TEST(DistributedExecutorTests, BroadcastJoinOrchestration) {
         } else if (h.type == RpcType::PushData) {
             push_calls++;
         }
-        
+
         auto resp_p = reply.serialize();
         RpcHeader resp_h;
         resp_h.type = RpcType::QueryResults;
@@ -252,7 +267,7 @@ TEST(DistributedExecutorTests, BroadcastJoinOrchestration) {
     node1.set_handler(RpcType::PushData, handler);
     node2.set_handler(RpcType::ExecuteFragment, handler);
     node2.set_handler(RpcType::PushData, handler);
-    
+
     ASSERT_TRUE(node1.start());
     ASSERT_TRUE(node2.start());
 
@@ -266,16 +281,19 @@ TEST(DistributedExecutorTests, BroadcastJoinOrchestration) {
 
     // 3. Execute JOIN
     // Use a format that build_plan understands
-    auto lexer = std::make_unique<Lexer>("SELECT * FROM big_table JOIN small_table ON big_table.id = small_table.id");
+    auto lexer = std::make_unique<Lexer>(
+        "SELECT * FROM big_table JOIN small_table ON big_table.id = small_table.id");
     Parser parser(std::move(lexer));
     auto stmt = parser.parse_statement();
-    
+
     // This should trigger broadcast_table("small_table")
-    auto res = exec.execute(*stmt, "SELECT * FROM big_table JOIN small_table ON big_table.id = small_table.id");
+    auto res = exec.execute(
+        *stmt, "SELECT * FROM big_table JOIN small_table ON big_table.id = small_table.id");
 
     // 4. Verify orchestration
-    // Each node should have been asked to fetch (2 calls) AND each node should have received push (2 calls)
-    // Wait for async operations if any (though currently broadcast_table is synchronous loop)
+    // Each node should have been asked to fetch (2 calls) AND each node should have received push
+    // (2 calls) Wait for async operations if any (though currently broadcast_table is synchronous
+    // loop)
     EXPECT_GE(push_calls.load(), 2);
     EXPECT_TRUE(res.success());
 
@@ -283,4 +301,4 @@ TEST(DistributedExecutorTests, BroadcastJoinOrchestration) {
     node2.stop();
 }
 
-} // namespace
+}  // namespace

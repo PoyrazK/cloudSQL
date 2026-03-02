@@ -232,7 +232,8 @@ struct QueryResultsReply {
             offset += 4;
         }
         if (in.size() >= offset + err_len) {
-            reply.error_msg = std::string(reinterpret_cast<const char*>(in.data() + offset), err_len);
+            reply.error_msg =
+                std::string(reinterpret_cast<const char*>(in.data() + offset), err_len);
             offset += err_len;
         }
 
@@ -283,7 +284,8 @@ struct PushDataArgs {
         std::memcpy(&name_len, in.data() + offset, 4);
         offset += 4;
         if (in.size() >= offset + name_len) {
-            args.table_name = std::string(reinterpret_cast<const char*>(in.data() + offset), name_len);
+            args.table_name =
+                std::string(reinterpret_cast<const char*>(in.data() + offset), name_len);
             offset += name_len;
         }
         uint32_t row_count = 0;

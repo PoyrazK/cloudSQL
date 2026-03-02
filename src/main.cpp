@@ -359,8 +359,8 @@ int main(int argc, char* argv[]) {
                         int fd) {
                         (void)h;
                         auto args = cloudsql::network::PushDataArgs::deserialize(p);
-                        std::cout << "[Shuffle] Received " << args.rows.size()
-                                  << " rows for table " << args.table_name << "\n";
+                        std::cout << "[Shuffle] Received " << args.rows.size() << " rows for table "
+                                  << args.table_name << "\n";
 
                         if (cluster_manager != nullptr) {
                             cluster_manager->buffer_shuffle_data(args.table_name,

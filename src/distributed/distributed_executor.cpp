@@ -132,8 +132,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     }
                     return std::make_pair(false, "[" + node.id + "] RPC failed during prepare");
                 }
-                return std::make_pair(false,
-                                      "[" + node.id + "] Connection failed during prepare");
+                return std::make_pair(false, "[" + node.id + "] Connection failed during prepare");
             }));
         }
 
@@ -152,13 +151,14 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
 
         std::vector<std::future<void>> phase2_futures;
         for (const auto& node : data_nodes) {
-            phase2_futures.push_back(std::async(std::launch::async, [&node, payload, phase2_type]() {
-                network::RpcClient client(node.address, node.cluster_port);
-                if (client.connect()) {
-                    std::vector<uint8_t> resp_payload;
-                    static_cast<void>(client.call(phase2_type, payload, resp_payload));
-                }
-            }));
+            phase2_futures.push_back(
+                std::async(std::launch::async, [&node, payload, phase2_type]() {
+                    network::RpcClient client(node.address, node.cluster_port);
+                    if (client.connect()) {
+                        std::vector<uint8_t> resp_payload;
+                        static_cast<void>(client.call(phase2_type, payload, resp_payload));
+                    }
+                }));
         }
         for (auto& f : phase2_futures) {
             f.get();
@@ -361,8 +361,7 @@ bool DistributedExecutor::broadcast_table(const std::string& table_name) {
         network::RpcClient client(node.address, node.cluster_port);
         if (client.connect()) {
             std::vector<uint8_t> resp_payload;
-            static_cast<void>(
-                client.call(network::RpcType::PushData, push_payload, resp_payload));
+            static_cast<void>(client.call(network::RpcType::PushData, push_payload, resp_payload));
         }
     }
 
