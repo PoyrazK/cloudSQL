@@ -157,35 +157,47 @@ class Serializer {
 };
 
 /**
- * @brief Header for all internal RPC messages (fixed 8 bytes)
+ * @brief Header for all internal RPC messages (fixed 12 bytes)
  */
 struct RpcHeader {
     static constexpr uint32_t MAGIC = 0x4353514C;  // 'CSQL'
-    static constexpr size_t HEADER_SIZE = 8;
+    static constexpr size_t HEADER_SIZE = 12;
 
     uint32_t magic = MAGIC;
     RpcType type = RpcType::Error;
     uint8_t flags = 0;
+    uint16_t group_id = 0;  // For Multi-Group Raft
+    uint16_t reserved = 0;
     uint16_t payload_len = 0;
 
     void encode(char* out) const {
         uint32_t n_magic = htonl(magic);
+        uint16_t n_group = htons(group_id);
+        uint16_t n_reserved = htons(reserved);
         uint16_t n_len = htons(payload_len);
         std::memcpy(out, &n_magic, 4);
         out[4] = static_cast<char>(type);
         out[5] = static_cast<char>(flags);
-        std::memcpy(out + 6, &n_len, 2);
+        std::memcpy(out + 6, &n_group, 2);
+        std::memcpy(out + 8, &n_reserved, 2);
+        std::memcpy(out + 10, &n_len, 2);
     }
 
     static RpcHeader decode(const char* in) {
         RpcHeader h;
         uint32_t n_magic = 0;
+        uint16_t n_group = 0;
+        uint16_t n_reserved = 0;
         uint16_t n_len = 0;
         std::memcpy(&n_magic, in, 4);
         h.magic = ntohl(n_magic);
         h.type = static_cast<RpcType>(static_cast<uint8_t>(in[4]));
         h.flags = static_cast<uint8_t>(in[5]);
-        std::memcpy(&n_len, in + 6, 2);
+        std::memcpy(&n_group, in + 6, 2);
+        h.group_id = ntohs(n_group);
+        std::memcpy(&n_reserved, in + 8, 2);
+        h.reserved = ntohs(n_reserved);
+        std::memcpy(&n_len, in + 10, 2);
         h.payload_len = ntohs(n_len);
         return h;
     }

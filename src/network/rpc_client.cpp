@@ -67,8 +67,8 @@ bool RpcClient::call(RpcType type, const std::vector<uint8_t>& payload,
         return false;
     }
 
-    std::array<char, 8> header_buf{};
-    if (recv(fd_, header_buf.data(), 8, MSG_WAITALL) <= 0) {
+    std::array<char, RpcHeader::HEADER_SIZE> header_buf{};
+    if (recv(fd_, header_buf.data(), RpcHeader::HEADER_SIZE, MSG_WAITALL) <= 0) {
         return false;
     }
 
@@ -93,10 +93,10 @@ bool RpcClient::send_only(RpcType type, const std::vector<uint8_t>& payload) {
     header.type = type;
     header.payload_len = static_cast<uint16_t>(payload.size());
 
-    char header_buf[8];
+    char header_buf[RpcHeader::HEADER_SIZE];
     header.encode(header_buf);
 
-    if (send(fd_, header_buf, 8, 0) <= 0) {
+    if (send(fd_, header_buf, RpcHeader::HEADER_SIZE, 0) <= 0) {
         return false;
     }
     if (!payload.empty()) {

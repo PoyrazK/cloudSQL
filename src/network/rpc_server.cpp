@@ -101,9 +101,9 @@ void RpcServer::accept_loop() {
 }
 
 void RpcServer::handle_client(int client_fd) {
-    std::array<char, 8> header_buf{};
+    std::array<char, RpcHeader::HEADER_SIZE> header_buf{};
     while (running_) {
-        const ssize_t n = recv(client_fd, header_buf.data(), 8, MSG_WAITALL);
+        const ssize_t n = recv(client_fd, header_buf.data(), RpcHeader::HEADER_SIZE, MSG_WAITALL);
         if (n <= 0) {
             break;
         }

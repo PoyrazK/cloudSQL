@@ -26,7 +26,7 @@
 #include "catalog/catalog.hpp"
 #include "common/cluster_manager.hpp"
 #include "common/config.hpp"
-#include "distributed/raft_node.hpp"
+#include "distributed/raft_manager.hpp"
 #include "distributed/shard_manager.hpp"
 #include "executor/query_executor.hpp"
 #include "network/rpc_client.hpp"
@@ -221,7 +221,7 @@ int main(int argc, char* argv[]) {
 
         std::unique_ptr<cloudsql::network::RpcServer> rpc_server = nullptr;
         std::unique_ptr<cloudsql::cluster::ClusterManager> cluster_manager = nullptr;
-        std::unique_ptr<cloudsql::raft::RaftNode> raft_node = nullptr;
+        std::unique_ptr<cloudsql::raft::RaftManager> raft_manager = nullptr;
 
         /* Role-specific logic */
         if (config.mode != cloudsql::config::RunMode::Standalone) {
@@ -266,9 +266,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        send(fd, h_buf, 8, 0);
+                        send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0);
                         send(fd, resp_p.data(), resp_p.size(), 0);
                     });
 
@@ -295,9 +295,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        send(fd, h_buf, 8, 0);
+                        send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0);
                         send(fd, resp_p.data(), resp_p.size(), 0);
                     });
 
@@ -323,9 +323,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        send(fd, h_buf, 8, 0);
+                        send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0);
                         send(fd, resp_p.data(), resp_p.size(), 0);
                     });
 
@@ -351,9 +351,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        send(fd, h_buf, 8, 0);
+                        send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0);
                         send(fd, resp_p.data(), resp_p.size(), 0);
                     });
 
@@ -378,9 +378,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, 8, 0));
+                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -502,9 +502,9 @@ int main(int argc, char* argv[]) {
                         cloudsql::network::RpcHeader resp_h;
                         resp_h.type = cloudsql::network::RpcType::QueryResults;
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
-                        char h_buf[8];
+                        char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, 8, 0));
+                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
             }
@@ -546,13 +546,16 @@ int main(int argc, char* argv[]) {
             if (config.mode == cloudsql::config::RunMode::Coordinator) {
                 std::cout << "Coordinator node joining cluster...\n";
                 const std::string node_id = "node_" + std::to_string(config.cluster_port);
-                raft_node = std::make_unique<cloudsql::raft::RaftNode>(node_id, *cluster_manager,
+                raft_manager = std::make_unique<cloudsql::raft::RaftManager>(node_id, *cluster_manager,
                                                                        *rpc_server);
 
-                /* Step 4: Link Catalog to RaftNode */
-                catalog->set_raft_node(raft_node.get());
+                /* Create Catalog group (ID 0) */
+                auto catalog_group = raft_manager->get_or_create_group(0);
 
-                raft_node->start();
+                /* Step 4: Link Catalog to RaftGroup */
+                catalog->set_raft_group(catalog_group.get());
+
+                raft_manager->start();
             }
         }
 
@@ -571,8 +574,8 @@ int main(int argc, char* argv[]) {
             server.reset();
         }
 
-        if (raft_node) {
-            raft_node->stop();
+        if (raft_manager) {
+            raft_manager->stop();
         }
 
         if (rpc_server) {

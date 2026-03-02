@@ -22,7 +22,7 @@
 namespace cloudsql {
 
 namespace raft {
-class RaftNode;
+class RaftGroup;
 }
 
 // Type aliases
@@ -158,9 +158,9 @@ class Catalog {
     [[nodiscard]] static std::unique_ptr<Catalog> create();
 
     /**
-     * @brief Set Raft node for distributed operations
+     * @brief Set Raft group for distributed operations
      */
-    void set_raft_node(raft::RaftNode* raft_node) { raft_node_ = raft_node; }
+    void set_raft_group(raft::RaftGroup* raft_group) { raft_group_ = raft_group; }
 
     /**
      * @brief Load catalog from file
@@ -271,7 +271,7 @@ class Catalog {
     DatabaseInfo database_;
     oid_t next_oid_ = 1;
     uint64_t version_ = 1;
-    raft::RaftNode* raft_node_ = nullptr;
+    raft::RaftGroup* raft_group_ = nullptr;
 
     [[nodiscard]] static uint64_t get_current_time();
 };

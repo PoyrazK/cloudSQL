@@ -1,10 +1,10 @@
 /**
- * @file raft_node.hpp
- * @brief Raft consensus node implementation
+ * @file raft_group.hpp
+ * @brief Raft consensus group implementation
  */
 
-#ifndef SQL_ENGINE_DISTRIBUTED_RAFT_NODE_HPP
-#define SQL_ENGINE_DISTRIBUTED_RAFT_NODE_HPP
+#ifndef SQL_ENGINE_DISTRIBUTED_RAFT_GROUP_HPP
+#define SQL_ENGINE_DISTRIBUTED_RAFT_GROUP_HPP
 
 #include <atomic>
 #include <chrono>
@@ -22,24 +22,24 @@
 namespace cloudsql::raft {
 
 /**
- * @brief Implementation of a Raft consensus node
+ * @brief Implementation of a Raft consensus group
  */
-class RaftNode {
+class RaftGroup {
    public:
-    RaftNode(std::string node_id, cluster::ClusterManager& cluster_manager,
-             network::RpcServer& rpc_server);
-    ~RaftNode();
+    RaftGroup(uint16_t group_id, std::string node_id, cluster::ClusterManager& cluster_manager,
+              network::RpcServer& rpc_server);
+    ~RaftGroup();
 
     // Prevent copying and moving
-    RaftNode(const RaftNode&) = delete;
-    RaftNode& operator=(const RaftNode&) = delete;
-    RaftNode(RaftNode&&) = delete;
-    RaftNode& operator=(RaftNode&&) = delete;
+    RaftGroup(const RaftGroup&) = delete;
+    RaftGroup& operator=(const RaftGroup&) = delete;
+    RaftGroup(RaftGroup&&) = delete;
+    RaftGroup& operator=(RaftGroup&&) = delete;
 
     void start();
     void stop();
 
-    // Raft RPC Handlers
+    // Raft RPC Handlers (called by RaftManager)
     void handle_request_vote(const network::RpcHeader& header, const std::vector<uint8_t>& payload,
                              int client_fd);
     void handle_append_entries(const network::RpcHeader& header,
@@ -48,6 +48,7 @@ class RaftNode {
     // Client interface
     bool replicate(const std::string& command);
     [[nodiscard]] bool is_leader() const { return state_.load() == NodeState::Leader; }
+    [[nodiscard]] uint16_t group_id() const { return group_id_; }
 
    private:
     void run_loop();
@@ -62,6 +63,7 @@ class RaftNode {
     // Helpers
     [[nodiscard]] std::chrono::milliseconds get_random_timeout() const;
 
+    uint16_t group_id_;
     std::string node_id_;
     cluster::ClusterManager& cluster_manager_;
     network::RpcServer& rpc_server_;
@@ -83,4 +85,4 @@ class RaftNode {
 
 }  // namespace cloudsql::raft
 
-#endif  // SQL_ENGINE_DISTRIBUTED_RAFT_NODE_HPP
+#endif  // SQL_ENGINE_DISTRIBUTED_RAFT_GROUP_HPP
