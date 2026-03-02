@@ -8,10 +8,12 @@
 #include <future>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "catalog/catalog.hpp"
 #include "common/cluster_manager.hpp"
+#include "common/value.hpp"
 #include "distributed/shard_manager.hpp"
 #include "network/rpc_client.hpp"
 #include "network/rpc_message.hpp"
@@ -19,6 +21,47 @@
 #include "parser/statement.hpp"
 
 namespace cloudsql::executor {
+
+namespace {
+
+/**
+ * @brief Simple helper to extract sharding key from WHERE clause
+ * Currently handles only "id = constant" format for POC
+ */
+bool try_extract_sharding_key(const parser::Expression* where, common::Value& out_val) {
+    if (where == nullptr || where->type() != parser::ExprType::Binary) {
+        return false;
+    }
+
+    const auto* bin_expr = dynamic_cast<const parser::BinaryExpr*>(where);
+    if (bin_expr == nullptr || bin_expr->op() != parser::TokenType::Eq) {
+        return false;
+    }
+
+    // Check if left is Column and right is Constant
+    if (bin_expr->left().type() == parser::ExprType::Column &&
+        bin_expr->right().type() == parser::ExprType::Constant) {
+        const auto* const_expr = dynamic_cast<const parser::ConstantExpr*>(&bin_expr->right());
+        if (const_expr != nullptr) {
+            out_val = const_expr->value();
+            return true;
+        }
+    }
+
+    // Check if right is Column and left is Constant
+    if (bin_expr->right().type() == parser::ExprType::Column &&
+        bin_expr->left().type() == parser::ExprType::Constant) {
+        const auto* const_expr = dynamic_cast<const parser::ConstantExpr*>(&bin_expr->left());
+        if (const_expr != nullptr) {
+            out_val = const_expr->value();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+}  // namespace
 
 DistributedExecutor::DistributedExecutor(Catalog& catalog, cluster::ClusterManager& cm)
     : catalog_(catalog), cluster_manager_(cm) {}
@@ -33,7 +76,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         type == parser::StmtType::CreateIndex || type == parser::StmtType::DropIndex) {
         // These are handled by Raft via the Catalog locally on the leader
         // and replicated to followers.
-        return QueryResult();  // Default is success
+        return {};  // Default is success
     }
 
     auto data_nodes = cluster_manager_.get_data_nodes();
@@ -41,6 +84,24 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         QueryResult res;
         res.set_error("No active data nodes in cluster");
         return res;
+    }
+
+    // Advanced Joins: Broadcast Join Orchestration
+    if (type == parser::StmtType::Select) {
+        const auto* select_stmt = dynamic_cast<const parser::SelectStatement*>(&stmt);
+        if (select_stmt != nullptr && !select_stmt->joins().empty()) {
+            // POC: Broadcast all join tables to all nodes
+            for (const auto& join : select_stmt->joins()) {
+                const std::string join_table = join.table->to_string();
+                std::cout << "[Executor] Orchestrating Broadcast Join for table: " << join_table
+                          << "\n";
+                if (!broadcast_table(join_table)) {
+                    QueryResult res;
+                    res.set_error("Failed to broadcast table: " + join_table);
+                    return res;
+                }
+            }
+        }
     }
 
     // 2. Distributed Transaction Management (2PC)
@@ -63,22 +124,25 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     std::vector<uint8_t> resp_payload;
                     if (client.call(network::RpcType::TxnPrepare, payload, resp_payload)) {
                         auto reply = network::QueryResultsReply::deserialize(resp_payload);
-                        if (reply.success) return std::make_pair(true, std::string(""));
+                        if (reply.success) {
+                            return std::make_pair(true, std::string(""));
+                        }
                         return std::make_pair(
                             false, "[" + node.id + "] Prepare failed: " + reply.error_msg);
                     }
                     return std::make_pair(false, "[" + node.id + "] RPC failed during prepare");
                 }
-                return std::make_pair(false, "[" + node.id + "] Connection failed during prepare");
+                return std::make_pair(false,
+                                      "[" + node.id + "] Connection failed during prepare");
             }));
         }
 
         bool all_prepared = true;
         for (auto& f : prepare_futures) {
-            auto res = f.get();
-            if (!res.first) {
+            auto res_p = f.get();
+            if (!res_p.first) {
                 all_prepared = false;
-                errors += res.second + "; ";
+                errors += res_p.second + "; ";
             }
         }
 
@@ -88,19 +152,20 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
 
         std::vector<std::future<void>> phase2_futures;
         for (const auto& node : data_nodes) {
-            phase2_futures.push_back(
-                std::async(std::launch::async, [&node, payload, phase2_type]() {
-                    network::RpcClient client(node.address, node.cluster_port);
-                    if (client.connect()) {
-                        std::vector<uint8_t> resp_payload;
-                        static_cast<void>(client.call(phase2_type, payload, resp_payload));
-                    }
-                }));
+            phase2_futures.push_back(std::async(std::launch::async, [&node, payload, phase2_type]() {
+                network::RpcClient client(node.address, node.cluster_port);
+                if (client.connect()) {
+                    std::vector<uint8_t> resp_payload;
+                    static_cast<void>(client.call(phase2_type, payload, resp_payload));
+                }
+            }));
         }
-        for (auto& f : phase2_futures) f.get();
+        for (auto& f : phase2_futures) {
+            f.get();
+        }
 
         if (all_prepared) {
-            return QueryResult();
+            return {};
         }
         QueryResult res;
         res.set_error("Distributed transaction aborted: " + errors);
@@ -123,8 +188,10 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 }
             }));
         }
-        for (auto& f : rollback_futures) f.get();
-        return QueryResult();
+        for (auto& f : rollback_futures) {
+            f.get();
+        }
+        return {};
     }
 
     // 3. Query Analysis for Routing
@@ -132,19 +199,38 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
 
     if (type == parser::StmtType::Insert) {
         const auto* insert_stmt = dynamic_cast<const parser::InsertStatement*>(&stmt);
-        if (insert_stmt && !insert_stmt->values().empty() && !insert_stmt->values()[0].empty()) {
+        if (insert_stmt != nullptr && !insert_stmt->values().empty() &&
+            !insert_stmt->values()[0].empty()) {
             // Assume first column is sharding key
             const auto* first_val_expr = insert_stmt->values()[0][0].get();
             if (first_val_expr->type() == parser::ExprType::Constant) {
                 const auto* const_expr = dynamic_cast<const parser::ConstantExpr*>(first_val_expr);
-                if (const_expr) {
-                    common::Value pk_val = const_expr->value();
+                if (const_expr != nullptr) {
+                    const common::Value pk_val = const_expr->value();
 
-                    uint32_t shard_idx = cluster::ShardManager::compute_shard(
+                    const uint32_t shard_idx = cluster::ShardManager::compute_shard(
                         pk_val, static_cast<uint32_t>(data_nodes.size()));
                     target_nodes.push_back(data_nodes[shard_idx]);
                 }
             }
+        }
+    } else if (type == parser::StmtType::Select || type == parser::StmtType::Update ||
+               type == parser::StmtType::Delete) {
+        // Try shard pruning based on WHERE clause
+        const parser::Expression* where_expr = nullptr;
+        if (type == parser::StmtType::Select) {
+            where_expr = dynamic_cast<const parser::SelectStatement*>(&stmt)->where();
+        } else if (type == parser::StmtType::Update) {
+            where_expr = dynamic_cast<const parser::UpdateStatement*>(&stmt)->where();
+        } else if (type == parser::StmtType::Delete) {
+            where_expr = dynamic_cast<const parser::DeleteStatement*>(&stmt)->where();
+        }
+
+        common::Value pk_val;
+        if (try_extract_sharding_key(where_expr, pk_val)) {
+            const uint32_t shard_idx = cluster::ShardManager::compute_shard(
+                pk_val, static_cast<uint32_t>(data_nodes.size()));
+            target_nodes.push_back(data_nodes[shard_idx]);
         }
     }
 
@@ -159,32 +245,128 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
 
     bool all_success = true;
     std::string errors;
+    std::vector<executor::Tuple> aggregated_rows;
 
+    std::vector<std::future<std::pair<bool, network::QueryResultsReply>>> query_futures;
     for (const auto& node : target_nodes) {
-        network::RpcClient client(node.address, node.cluster_port);
-        if (client.connect()) {
-            std::vector<uint8_t> resp_payload;
-            if (client.call(network::RpcType::ExecuteFragment, payload, resp_payload)) {
-                auto reply = network::QueryResultsReply::deserialize(resp_payload);
-                if (!reply.success) {
-                    all_success = false;
-                    errors += "[" + node.id + "]: " + reply.error_msg + "; ";
+        query_futures.push_back(std::async(std::launch::async, [&node, payload]() {
+            network::RpcClient client(node.address, node.cluster_port);
+            network::QueryResultsReply reply;
+            if (client.connect()) {
+                std::vector<uint8_t> resp_payload;
+                if (client.call(network::RpcType::ExecuteFragment, payload, resp_payload)) {
+                    reply = network::QueryResultsReply::deserialize(resp_payload);
+                    return std::make_pair(true, reply);
                 }
-            } else {
-                all_success = false;
-                errors += "Failed to contact data node " + node.id + "; ";
+            }
+            reply.success = false;
+            reply.error_msg = "Failed to contact node " + node.id;
+            return std::make_pair(false, reply);
+        }));
+    }
+
+    for (auto& f : query_futures) {
+        auto res_fut = f.get();
+        if (res_fut.first && res_fut.second.success) {
+            for (auto& row : res_fut.second.rows) {
+                aggregated_rows.push_back(std::move(row));
             }
         } else {
             all_success = false;
-            errors += "Failed to connect to data node " + node.id + "; ";
+            errors += "[" + res_fut.second.error_msg + "]; ";
         }
     }
 
-    if (all_success) return QueryResult();
+    if (all_success) {
+        QueryResult res;
+
+        // Step 2: Check for global aggregates (COUNT, SUM)
+        bool has_aggregate = false;
+        if (type == parser::StmtType::Select) {
+            const auto* select_stmt = dynamic_cast<const parser::SelectStatement*>(&stmt);
+            for (const auto& col : select_stmt->columns()) {
+                if (col->type() == parser::ExprType::Function) {
+                    const auto* func = dynamic_cast<const parser::FunctionExpr*>(col.get());
+                    if (func->name() == "COUNT" || func->name() == "SUM") {
+                        has_aggregate = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (has_aggregate && !aggregated_rows.empty()) {
+            // Simplified Merge: Assume single aggregate for POC
+            // Sum up values from the first column of all rows
+            int64_t total = 0;
+            std::cout << "[Executor] Merging " << aggregated_rows.size() << " aggregate results\n";
+            for (const auto& row : aggregated_rows) {
+                if (!row.empty()) {
+                    total += row.get(0).as_int64();
+                }
+            }
+            executor::Tuple merged_tuple;
+            merged_tuple.values().push_back(common::Value::make_int64(total));
+            res.add_row(std::move(merged_tuple));
+        } else {
+            for (auto& row : aggregated_rows) {
+                res.add_row(std::move(row));
+            }
+        }
+        return res;
+    }
 
     QueryResult res;
     res.set_error(errors);
     return res;
+}
+
+bool DistributedExecutor::broadcast_table(const std::string& table_name) {
+    auto data_nodes = cluster_manager_.get_data_nodes();
+    if (data_nodes.empty()) {
+        return false;
+    }
+
+    // 1. Fetch data from all shards
+    network::ExecuteFragmentArgs fetch_args;
+    fetch_args.sql = "SELECT * FROM " + table_name;
+    auto fetch_payload = fetch_args.serialize();
+
+    std::vector<executor::Tuple> all_rows;
+    for (const auto& node : data_nodes) {
+        network::RpcClient client(node.address, node.cluster_port);
+        if (client.connect()) {
+            std::vector<uint8_t> resp_payload;
+            if (client.call(network::RpcType::ExecuteFragment, fetch_payload, resp_payload)) {
+                auto reply = network::QueryResultsReply::deserialize(resp_payload);
+                if (reply.success) {
+                    all_rows.insert(all_rows.end(), std::make_move_iterator(reply.rows.begin()),
+                                    std::make_move_iterator(reply.rows.end()));
+                }
+            }
+        }
+    }
+
+    if (all_rows.empty()) {
+        return true;  // Empty table is fine
+    }
+
+    // 2. Push data to all nodes
+    network::PushDataArgs push_args;
+    push_args.table_name = table_name;
+    push_args.rows = std::move(all_rows);
+    auto push_payload = push_args.serialize();
+
+    for (const auto& node : data_nodes) {
+        network::RpcClient client(node.address, node.cluster_port);
+        if (client.connect()) {
+            std::vector<uint8_t> resp_payload;
+            static_cast<void>(
+                client.call(network::RpcType::PushData, push_payload, resp_payload));
+        }
+    }
+
+    return true;
 }
 
 }  // namespace cloudsql::executor
