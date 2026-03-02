@@ -363,6 +363,7 @@ int main(int argc, char* argv[]) {
                                   << args.table_name << "\n";
 
                         if (cluster_manager != nullptr) {
+
                             cluster_manager->buffer_shuffle_data(args.table_name,
                                                                  std::move(args.rows));
                         }
