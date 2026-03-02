@@ -32,6 +32,7 @@ enum class RpcType : uint8_t {
     TxnCommit = 7,
     TxnAbort = 8,
     PushData = 9,
+    ShuffleFragment = 10,
     Error = 255
 };
 
@@ -131,6 +132,28 @@ class Serializer {
         }
         return executor::Tuple(std::move(values));
     }
+
+    static void serialize_string(const std::string& s, std::vector<uint8_t>& out) {
+        const auto len = static_cast<uint32_t>(s.size());
+        const size_t offset = out.size();
+        out.resize(offset + 4 + len);
+        std::memcpy(out.data() + offset, &len, 4);
+        std::memcpy(out.data() + offset + 4, s.data(), len);
+    }
+
+    static std::string deserialize_string(const uint8_t* data, size_t& offset, size_t size) {
+        uint32_t len = 0;
+        if (offset + 4 <= size) {
+            std::memcpy(&len, data + offset, 4);
+            offset += 4;
+        }
+        std::string s;
+        if (offset + len <= size) {
+            s.assign(reinterpret_cast<const char*>(data + offset), len);
+            offset += len;
+        }
+        return s;
+    }
 };
 
 /**
@@ -173,16 +196,20 @@ struct RpcHeader {
  */
 struct ExecuteFragmentArgs {
     std::string sql;
+    std::string context_id;
 
     [[nodiscard]] std::vector<uint8_t> serialize() const {
-        std::vector<uint8_t> out(sql.size());
-        std::memcpy(out.data(), sql.data(), sql.size());
+        std::vector<uint8_t> out;
+        Serializer::serialize_string(sql, out);
+        Serializer::serialize_string(context_id, out);
         return out;
     }
 
     static ExecuteFragmentArgs deserialize(const std::vector<uint8_t>& in) {
         ExecuteFragmentArgs args;
-        args.sql = std::string(reinterpret_cast<const char*>(in.data()), in.size());
+        size_t offset = 0;
+        args.sql = Serializer::deserialize_string(in.data(), offset, in.size());
+        args.context_id = Serializer::deserialize_string(in.data(), offset, in.size());
         return args;
     }
 };
@@ -198,15 +225,10 @@ struct QueryResultsReply {
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;
         out.push_back(success ? 1 : 0);
-
-        const auto err_len = static_cast<uint32_t>(error_msg.size());
-        size_t offset = out.size();
-        out.resize(offset + 4 + err_len);
-        std::memcpy(out.data() + offset, &err_len, 4);
-        std::memcpy(out.data() + offset + 4, error_msg.data(), err_len);
+        Serializer::serialize_string(error_msg, out);
 
         const auto row_count = static_cast<uint32_t>(rows.size());
-        offset = out.size();
+        const size_t offset = out.size();
         out.resize(offset + 4);
         std::memcpy(out.data() + offset, &row_count, 4);
 
@@ -224,18 +246,8 @@ struct QueryResultsReply {
         }
 
         reply.success = in[0] != 0;
-
         size_t offset = 1;
-        uint32_t err_len = 0;
-        if (offset + 4 <= in.size()) {
-            std::memcpy(&err_len, in.data() + offset, 4);
-            offset += 4;
-        }
-        if (in.size() >= offset + err_len) {
-            reply.error_msg =
-                std::string(reinterpret_cast<const char*>(in.data() + offset), err_len);
-            offset += err_len;
-        }
+        reply.error_msg = Serializer::deserialize_string(in.data(), offset, in.size());
 
         uint32_t row_count = 0;
         if (offset + 4 <= in.size()) {
@@ -254,15 +266,14 @@ struct QueryResultsReply {
  * @brief Payload for pushing data between nodes (Shuffle)
  */
 struct PushDataArgs {
+    std::string context_id;
     std::string table_name;
     std::vector<executor::Tuple> rows;
 
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;
-        const auto name_len = static_cast<uint32_t>(table_name.size());
-        out.resize(4 + name_len);
-        std::memcpy(out.data(), &name_len, 4);
-        std::memcpy(out.data() + 4, table_name.data(), name_len);
+        Serializer::serialize_string(context_id, out);
+        Serializer::serialize_string(table_name, out);
 
         const auto row_count = static_cast<uint32_t>(rows.size());
         const size_t offset = out.size();
@@ -276,18 +287,10 @@ struct PushDataArgs {
 
     static PushDataArgs deserialize(const std::vector<uint8_t>& in) {
         PushDataArgs args;
-        if (in.size() < 4) {
-            return args;
-        }
-        uint32_t name_len = 0;
         size_t offset = 0;
-        std::memcpy(&name_len, in.data() + offset, 4);
-        offset += 4;
-        if (in.size() >= offset + name_len) {
-            args.table_name =
-                std::string(reinterpret_cast<const char*>(in.data() + offset), name_len);
-            offset += name_len;
-        }
+        args.context_id = Serializer::deserialize_string(in.data(), offset, in.size());
+        args.table_name = Serializer::deserialize_string(in.data(), offset, in.size());
+
         uint32_t row_count = 0;
         if (offset + 4 <= in.size()) {
             std::memcpy(&row_count, in.data() + offset, 4);
@@ -296,6 +299,32 @@ struct PushDataArgs {
         for (uint32_t i = 0; i < row_count; ++i) {
             args.rows.push_back(Serializer::deserialize_tuple(in.data(), offset, in.size()));
         }
+        return args;
+    }
+};
+
+/**
+ * @brief Payload for instructing a node to shuffle data based on a key
+ */
+struct ShuffleFragmentArgs {
+    std::string context_id;
+    std::string table_name;
+    std::string join_key_col;
+
+    [[nodiscard]] std::vector<uint8_t> serialize() const {
+        std::vector<uint8_t> out;
+        Serializer::serialize_string(context_id, out);
+        Serializer::serialize_string(table_name, out);
+        Serializer::serialize_string(join_key_col, out);
+        return out;
+    }
+
+    static ShuffleFragmentArgs deserialize(const std::vector<uint8_t>& in) {
+        ShuffleFragmentArgs args;
+        size_t offset = 0;
+        args.context_id = Serializer::deserialize_string(in.data(), offset, in.size());
+        args.table_name = Serializer::deserialize_string(in.data(), offset, in.size());
+        args.join_key_col = Serializer::deserialize_string(in.data(), offset, in.size());
         return args;
     }
 };
