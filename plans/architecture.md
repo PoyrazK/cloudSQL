@@ -178,154 +178,44 @@ flowchart TB
 **Purpose**: Accept connections from clients and coordinate between nodes
 
 **External Protocol** (Client-facing):
-- PostgreSQL wire protocol for client connections
-- Standard tools (psql, drivers) work out of the box
+- PostgreSQL wire protocol for client connections.
+- Implemented in `src/network/server.cpp`.
 
 **Internal Protocol** (Node-to-node):
-- gRPC for coordinator-data communication
-- Raft for consensus communication
-
-**Educational Value**: Learn dual-protocol design, RPC frameworks
+- Custom binary RPC over TCP sockets.
+- `RpcHeader` tracks message type, flags, and payload length.
+- Key types: `ExecuteFragment`, `TxnPrepare`, `PushData`.
 
 ### 2. SQL Parser
 
-**Purpose**: Convert SQL text into internal query representation
+**Purpose**: Convert SQL text into internal query representation.
 
-**Components**:
-```
-SQL Text → Lexer → Parser → AST → Distributed Query Plan
-```
+**Status**: C++ implementation in `src/parser/` providing full AST for SELECT, INSERT, UPDATE, DELETE, and CREATE/DROP TABLE.
 
-**Supported Syntax**:
-```sql
--- DDL
-CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));
-CREATE TABLE orders (id INT PRIMARY KEY, user_id INT, amount DECIMAL(10,2));
-CREATE INDEX idx_user_name ON users(name);
+### 3. Distributed Executor & Optimizer
 
--- DML with sharding awareness
-SELECT * FROM users WHERE id = 1;           -- Routes to single shard
-SELECT * FROM users WHERE name = 'John';    -- Broadcasts to all shards
-SELECT * FROM users u JOIN orders o         -- Distributed join
-  ON u.id = o.user_id WHERE u.id = 1;
+**Purpose**: Convert AST into efficient distributed execution plan.
 
--- Aggregations (distributed)
-SELECT status, COUNT(*) FROM orders GROUP BY status;
-SELECT AVG(amount) FROM orders WHERE user_id = 1;
-```
+**Implemented Optimizations**:
+- **Shard Pruning**: Analyzes WHERE clause for partitioning keys to route queries to specific data nodes.
+- **Aggregation Merging**: Automatically merges partial counts and sums from multiple nodes at the coordinator.
+- **Broadcast Join**: Orchestrates the movement of small tables to all shards to enable local join execution.
 
-**Sharding Awareness**:
-- Qualified shard key → Direct to single shard
-- Unqualified → Broadcast to all shards
-- JOINs with sharding keys → Distributed join
-
-**Educational Value**: Lexer/parser design, distributed query parsing
-
-### 3. Query Planner & Optimizer
-
-**Purpose**: Convert AST into efficient distributed execution plan
-
-**Planning Stages**:
-
-```mermaid
-flowchart LR
-    AST[AST] --> Norm[Normalize]
-    Norm --> Part[Partition]
-    Part --> Plan[Local Plans]
-    Plan --> Optimize[Optimize]
-```
-
-**1. Query Normalization**:
-- Expand views
-- Simplify expressions
-- Resolve column references
-
-**2. Partition Analysis**:
-- Identify sharding key in WHERE clause
-- Determine if query is shard-local or broadcast
-- Split JOINs into local and distributed parts
-
-**3. Local Planning**:
-- Generate execution plan for each shard
-- Plan data movement between shards
-
-**4. Optimization**:
-- Push down predicates
-- Eliminate unnecessary columns
-- Choose join strategies (hash join, merge join)
-
-**Educational Value**: Distributed query planning, cost-based optimization
-
-### 4. Execution Engine
-
-**Purpose**: Execute distributed query plans
-
-**Execution Model**: Volcano-style with distributed extensions
-
-**Operators**:
-- `DistributedScan` - Scan local shard or broadcast
-- `DistributedJoin` - Shuffle-based join
-- `HashShuffle` - Data redistribution for joins
-- `Gather` - Collect results to coordinator
-- `Broadcast` - Send data to all shards
-
-**Query Execution Flow**:
-
-```mermaid
-sequenceDiagram
-    Client->>Coordinator: SELECT * FROM users WHERE id = 1
-    Coordinator->>Coordinator: Parse & Plan
-    Coordinator->>Data Node 2: Execute on shard
-    Data Node 2->>Coordinator: Results
-    Coordinator->>Client: Final results
-    
-    Client->>Coordinator: SELECT * FROM users u JOIN orders o ON u.id = o.user_id
-    Coordinator->>Coordinator: Distributed planning
-    Coordinator->>Data Node 1: Scan users (shard 1)
-    Coordinator->>Data Node 2: Scan orders (shard 2)
-    Data Node 1->>Data Node 2: Shuffle users by user_id
-    Data Node 2->>Data Node 2: Hash join
-    Data Node 2->>Coordinator: Join results
-    Coordinator->>Client: Final results
-```
-
-**Educational Value**: Distributed execution, data shuffling, operator design
-
-### 5. Transaction Manager
-
-**Purpose**: Provide ACID guarantees across distributed nodes
-
-**Isolation Level**: Read Committed + Snapshot Isolation
-
-**Distributed Transaction Protocol**:
-
-```mermaid
-flowchart TB
-    Coordinator[Coordinator] --> Prepare[Prepare Phase]
-    Prepare --> Check{All Ready?}
-    Check -->|Yes| Commit[Commit Phase]
-    Check -->|No| Abort[Abort Phase]
-    Commit --> Node1[Node 1]
-    Commit --> Node2[Node 2]
-    Commit --> Node3[Node 3]
-```
+### 4. Distributed Transactions
 
 **Two-Phase Commit (2PC)**:
-1. **Prepare**: Coordinator asks all participants to prepare
-2. **Commit**: If all participants ready, coordinator sends commit
-3. **Abort**: If any participant fails, coordinator sends abort
+1. **Prepare**: Coordinator sends `TxnPrepare` to all participants.
+2. **Commit/Abort**: If all nodes acknowledge prepare, `TxnCommit` is sent; otherwise, `TxnAbort`.
+3. **Recovery**: WAL-based recovery on data nodes ensures consistency after crash.
 
-**Conflict Detection**:
-- Row-level locking for writes
-- MVCC snapshot isolation for reads
-- Optimistic concurrency for distributed transactions
+### 5. Raft Consensus
 
-**Write-Ahead Log**:
-- Distributed WAL coordination
-- Log sequencing across nodes
-- Crash recovery with log replay
+**Purpose**: Maintain consistent metadata across coordinator nodes.
 
-**Educational Value**: Distributed transactions, 2PC, MVCC, crash recovery
+**Integrated Components**:
+- **Catalog Replication**: Table creation and deletion are logs in Raft and applied to the Catalog only upon commit.
+- **Leader Election**: Dynamic coordinator role assignment.
+- **Heartbeats**: Used for both health monitoring and cluster membership.
 
 ### 6. Storage Engine
 

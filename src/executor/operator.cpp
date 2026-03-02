@@ -103,6 +103,29 @@ Schema& SeqScanOperator::output_schema() {
     return schema_;
 }
 
+/* --- BufferScanOperator --- */
+
+BufferScanOperator::BufferScanOperator(std::string table_name, std::vector<Tuple> data,
+                                       Schema schema)
+    : Operator(OperatorType::BufferScan),
+      table_name_(std::move(table_name)),
+      data_(std::move(data)),
+      schema_(std::move(schema)) {}
+
+bool BufferScanOperator::next(Tuple& out_tuple) {
+    if (current_index_ >= data_.size()) {
+        set_state(ExecState::Done);
+        return false;
+    }
+    set_state(ExecState::Executing);
+    out_tuple = data_[current_index_++];
+    return true;
+}
+
+Schema& BufferScanOperator::output_schema() {
+    return schema_;
+}
+
 /* --- IndexScanOperator --- */
 
 IndexScanOperator::IndexScanOperator(std::unique_ptr<storage::HeapTable> table,

@@ -96,7 +96,7 @@ void RpcServer::accept_loop() {
 void RpcServer::handle_client(int client_fd) {
     std::array<char, 8> header_buf{};
     while (running_) {
-        const ssize_t n = recv(client_fd, header_buf.data(), 8, 0);
+        const ssize_t n = recv(client_fd, header_buf.data(), 8, MSG_WAITALL);
         if (n <= 0) {
             break;
         }
@@ -104,7 +104,9 @@ void RpcServer::handle_client(int client_fd) {
         const RpcHeader header = RpcHeader::decode(header_buf.data());
         std::vector<uint8_t> payload(header.payload_len);
         if (header.payload_len > 0) {
-            static_cast<void>(recv(client_fd, payload.data(), header.payload_len, 0));
+            if (recv(client_fd, payload.data(), header.payload_len, MSG_WAITALL) <= 0) {
+                break;
+            }
         }
 
         RpcHandler handler;
