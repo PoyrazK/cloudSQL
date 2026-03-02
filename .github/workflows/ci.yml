@@ -57,6 +57,7 @@ jobs:
           -DUSE_SANITIZER=${{ matrix.sanitizer }} \
           -DBUILD_TESTS=ON \
           -DSTRICT_LINT=OFF \
+          -DCMAKE_CXX_CLANG_TIDY="" \
           -DBUILD_COVERAGE=${{ matrix.sanitizer == 'address' && 'ON' || 'OFF' }}
 
     - name: Build
