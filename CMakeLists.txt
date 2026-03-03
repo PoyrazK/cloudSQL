@@ -1,174 +1,94 @@
-cmake_minimum_required(VERSION 3.16)
-project(sqlEngine VERSION 0.2.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.10)
+project(cloudSQL)
 
-# C++ Standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Position Independent Code (required for TSan and good practice for libraries)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Build Options
+option(STRICT_LINT "Enable strict linting" ON)
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 
-# Build options
-option(BUILD_TESTS "Build tests" ON)
-option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(BUILD_COVERAGE "Build with coverage instrumentation" OFF)
-option(STRICT_LINT "Treat all warnings as errors" ON)
+# Add include directories
+include_directories(include)
 
-set(USE_SANITIZER "address" CACHE STRING "Sanitizer to use: address, thread, undefined, or 'address,undefined'")
+# Find GoogleTest
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/refs/heads/main.zip
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
-# Configure Sanitizers
-if (NOT USE_SANITIZER STREQUAL "none")
-    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        string(REPLACE "," ";" SAN_LIST ${USE_SANITIZER})
-        foreach (SAN ${SAN_LIST})
-            list(APPEND SAN_FLAGS "-fsanitize=${SAN}")
-        endforeach()
-        list(APPEND SAN_FLAGS "-fno-omit-frame-pointer")
+# Core Library
+set(CORE_SOURCES
+    src/common/config.cpp
+    src/catalog/catalog.cpp
+    src/storage/storage_manager.cpp
+    src/storage/buffer_pool_manager.cpp
+    src/storage/lru_replacer.cpp
+    src/storage/heap_table.cpp
+    src/storage/btree_index.cpp
+    src/parser/lexer.cpp
+    src/parser/parser.cpp
+    src/parser/statement.cpp
+    src/parser/expression.cpp
+    src/executor/operator.cpp
+    src/executor/query_executor.cpp
+    src/network/rpc_client.cpp
+    src/network/rpc_server.cpp
+    src/network/server.cpp
+    src/transaction/lock_manager.cpp
+    src/transaction/transaction_manager.cpp
+    src/recovery/log_manager.cpp
+    src/recovery/recovery_manager.cpp
+    src/distributed/raft_group.cpp
+    src/distributed/raft_manager.cpp
+    src/distributed/distributed_executor.cpp
+)
 
-        if (SAN_FLAGS)
-            add_compile_options(${SAN_FLAGS})
-            add_link_options(${SAN_FLAGS})
-            message(STATUS "Enabled sanitizers: ${USE_SANITIZER}")
-        endif()
-    endif()
+add_library(sqlEngineCore ${CORE_SOURCES})
+
+# Sanitizers
+if(ENABLE_ASAN)
+    target_compile_options(sqlEngineCore PUBLIC -fsanitize=address)
+    target_link_libraries(sqlEngineCore PUBLIC -fsanitize=address)
 endif()
 
-# Enable compiler warnings
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    # Base warnings
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wshadow -Woverloaded-virtual -Wold-style-cast -Wnon-virtual-dtor")
-
-    # Advanced safety warnings
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion -Wformat=2")
-
-    if (STRICT_LINT)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-    endif()
+if(ENABLE_TSAN)
+    target_compile_options(sqlEngineCore PUBLIC -fsanitize=thread)
+    target_link_libraries(sqlEngineCore PUBLIC -fsanitize=thread)
 endif()
 
-if (MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
-    if (STRICT_LINT)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /WX")
-    endif()
-endif()
+# Main executable
+add_executable(cloudSQL src/main.cpp)
+target_link_libraries(cloudSQL sqlEngineCore)
 
-# Clang-Tidy integration
-if (NOT DEFINED CMAKE_CXX_CLANG_TIDY)
-    find_program(CLANG_TIDY_BIN NAMES clang-tidy
-        PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin /usr/bin /usr/local/bin)
+# Test helper macro
+macro(add_cloudsql_test NAME SOURCE)
+    add_executable(${NAME} ${SOURCE})
+    target_link_libraries(${NAME} sqlEngineCore GTest::gtest_main GTest::gmock)
+    add_test(NAME ${NAME} COMMAND ${NAME})
+endmacro()
 
-    if (CLANG_TIDY_BIN)
-        message(STATUS "Found clang-tidy: ${CLANG_TIDY_BIN}")
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_BIN}")
-    else()
-        message(WARNING "clang-tidy not found")
-    endif()
-endif()
-
-# Clang-Format target
-find_program(CLANG_FORMAT_BIN NAMES clang-format
-    PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin /usr/bin /usr/local/bin)
-
-if (CLANG_FORMAT_BIN)
-    file(GLOB_RECURSE ALL_CXX_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
-    add_custom_target(format
-        COMMAND ${CLANG_FORMAT_BIN} -i ${ALL_CXX_FILES}
-        COMMENT "Formatting all source files with clang-format")
-    add_custom_target(check-format
-        COMMAND ${CLANG_FORMAT_BIN} --dry-run --Werror ${ALL_CXX_FILES}
-        COMMENT "Checking code formatting compliance")
-endif()
-
-if (BUILD_COVERAGE)
-    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
-    endif()
-endif()
-
-# Source directories
-set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-# Collect all source files
-file(GLOB_RECURSE ALL_SOURCES "${SRC_DIR}/*.cpp")
-
-# Separate main.cpp from other sources
-set(CORE_SOURCES ${ALL_SOURCES})
-list(FILTER CORE_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
-
-# Create core library
-add_library(sqlEngineCore STATIC ${CORE_SOURCES})
-target_include_directories(sqlEngineCore PUBLIC ${INCLUDE_DIR})
-
-# Create main executable
-add_executable(sqlEngine src/main.cpp)
-target_link_libraries(sqlEngine PRIVATE sqlEngineCore)
-
-# Find and link required libraries
-find_package(Threads REQUIRED)
-target_link_libraries(sqlEngineCore PUBLIC Threads::Threads)
-
-# System libraries for networking
-if (UNIX AND NOT APPLE)
-    target_link_libraries(sqlEngineCore PUBLIC rt)
-endif()
-
-# Build test executables
-if (BUILD_TESTS)
+# Tests
+if(BUILD_TESTING)
     enable_testing()
-    include(FetchContent)
-    FetchContent_Declare(
-      googletest
-      URL https://github.com/google/googletest/archive/refs/heads/main.zip
-    )
-    # For Windows: prevent overriding the parent project's compiler/linker settings
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-
-    macro(add_cloudsql_test name source)
-        add_executable(${name} ${source})
-        target_link_libraries(${name} PRIVATE sqlEngineCore GTest::gtest_main GTest::gmock_main)
-        add_test(NAME ${name} COMMAND ${name})
-    endmacro()
-
-    add_cloudsql_test(sqlEngine_tests tests/cloudSQL_tests.cpp)
-    add_cloudsql_test(lock_manager_tests tests/lock_manager_tests.cpp)
-    add_cloudsql_test(server_tests tests/server_tests.cpp)
-    add_cloudsql_test(transaction_manager_tests tests/transaction_manager_tests.cpp)
+    add_cloudsql_test(cloudSQL_tests tests/cloudSQL_tests.cpp)
     add_cloudsql_test(statement_tests tests/statement_tests.cpp)
+    add_cloudsql_test(transaction_manager_tests tests/transaction_manager_tests.cpp)
+    add_cloudsql_test(lock_manager_tests tests/lock_manager_tests.cpp)
     add_cloudsql_test(recovery_tests tests/recovery_tests.cpp)
     add_cloudsql_test(recovery_manager_tests tests/recovery_manager_tests.cpp)
     add_cloudsql_test(buffer_pool_tests tests/buffer_pool_tests.cpp)
     add_cloudsql_test(raft_tests tests/raft_tests.cpp)
     add_cloudsql_test(distributed_tests tests/distributed_tests.cpp)
     add_cloudsql_test(raft_sim_tests tests/raft_simulation_tests.cpp)
+    add_cloudsql_test(multi_raft_tests tests/multi_raft_tests.cpp)
     add_cloudsql_test(distributed_txn_tests tests/distributed_txn_tests.cpp)
 
     add_custom_target(run-tests
         COMMAND ${CMAKE_CTEST_COMMAND}
         COMMENT "Running all tests via CTest")
 endif()
-
-# Installation
-install(TARGETS sqlEngine RUNTIME DESTINATION bin)
-install(DIRECTORY ${INCLUDE_DIR} DESTINATION include)
-
-# Print configuration
-message(STATUS "=============================================")
-message(STATUS "cloudSQL Build Configuration")
-message(STATUS "=============================================")
-message(STATUS "  Version: ${PROJECT_VERSION}")
-message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "  Build Tests: ${BUILD_TESTS}")
-message(STATUS "  Sanitizer: ${USE_SANITIZER}")
-message(STATUS "  Strict Lint: ${STRICT_LINT}")
-message(STATUS "=============================================")

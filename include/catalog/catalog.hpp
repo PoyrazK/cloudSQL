@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "common/value.hpp"
+#include "distributed/raft_types.hpp"
 
 namespace cloudsql {
 
@@ -145,8 +146,12 @@ struct DatabaseInfo {
 /**
  * @brief System Catalog class
  */
-class Catalog {
+class Catalog : public raft::RaftStateMachine {
    public:
+    /**
+     * @brief Apply a committed log entry (from RaftStateMachine)
+     */
+    void apply(const raft::LogEntry& entry) override;
     /**
      * @brief Default constructor
      */

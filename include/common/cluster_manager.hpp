@@ -15,6 +15,10 @@
 #include "common/config.hpp"
 #include "executor/types.hpp"
 
+namespace cloudsql::raft {
+class RaftManager;
+}
+
 namespace cloudsql::cluster {
 
 /**
@@ -34,7 +38,7 @@ struct NodeInfo {
  */
 class ClusterManager {
    public:
-    explicit ClusterManager(const config::Config* config) : config_(config) {
+    explicit ClusterManager(const config::Config* config) : config_(config), raft_manager_(nullptr) {
         // Add self to node map if in distributed mode
         if (config_ != nullptr && config_->mode != config::RunMode::Standalone) {
             self_node_.id = "local_node";  // Will be replaced by unique ID later
@@ -55,6 +59,16 @@ class ClusterManager {
     }
 
     /**
+     * @brief Set Raft manager for this node
+     */
+    void set_raft_manager(raft::RaftManager* rm) { raft_manager_ = rm; }
+
+    /**
+     * @brief Get Raft manager for this node
+     */
+    [[nodiscard]] raft::RaftManager* get_raft_manager() const { return raft_manager_; }
+
+    /**
      * @brief Update heartbeat for a node
      */
     void heartbeat(const std::string& id) {
@@ -63,6 +77,26 @@ class ClusterManager {
             nodes_[id].last_heartbeat = std::chrono::system_clock::now();
             nodes_[id].is_active = true;
         }
+    }
+
+    /**
+     * @brief Update leader ID for a specific Raft group
+     */
+    void set_leader(uint16_t group_id, const std::string& leader_id) {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        group_leaders_[group_id] = leader_id;
+    }
+
+    /**
+     * @brief Get current leader for a Raft group
+     */
+    [[nodiscard]] std::string get_leader(uint16_t group_id) const {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        auto it = group_leaders_.find(group_id);
+        if (it != group_leaders_.end()) {
+            return it->second;
+        }
+        return "";
     }
 
     /**
@@ -138,8 +172,10 @@ class ClusterManager {
 
    private:
     const config::Config* config_;
+    raft::RaftManager* raft_manager_;
     NodeInfo self_node_;
     std::unordered_map<std::string, NodeInfo> nodes_;
+    std::unordered_map<uint16_t, std::string> group_leaders_;
     /* context_id -> table_name -> rows */
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<executor::Tuple>>>
         shuffle_buffers_;

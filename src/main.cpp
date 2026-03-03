@@ -222,13 +222,29 @@ int main(int argc, char* argv[]) {
         std::unique_ptr<cloudsql::network::RpcServer> rpc_server = nullptr;
         std::unique_ptr<cloudsql::cluster::ClusterManager> cluster_manager = nullptr;
         std::unique_ptr<cloudsql::raft::RaftManager> raft_manager = nullptr;
+        
+        // State machines for replication
+        std::vector<std::unique_ptr<cloudsql::raft::RaftStateMachine>> shard_state_machines;
 
         /* Role-specific logic */
         if (config.mode != cloudsql::config::RunMode::Standalone) {
             cluster_manager = std::make_unique<cloudsql::cluster::ClusterManager>(&config);
             rpc_server = std::make_unique<cloudsql::network::RpcServer>(config.cluster_port);
+            
+            const std::string node_id = "node_" + std::to_string(config.cluster_port);
+            raft_manager = std::make_unique<cloudsql::raft::RaftManager>(node_id, *cluster_manager,
+                                                                   *rpc_server);
+            cluster_manager->set_raft_manager(raft_manager.get());
 
             if (config.mode == cloudsql::config::RunMode::Data) {
+                // POC: Initialize state machine for a shard (e.g., shard 1)
+                // In a real system, this would be triggered dynamically by the coordinator.
+                auto shard_group = raft_manager->get_or_create_group(1);
+                auto sm = std::make_unique<cloudsql::executor::ShardStateMachine>(
+                    "users", *bpm, *catalog);
+                shard_group->set_state_machine(sm.get());
+                shard_state_machines.push_back(std::move(sm));
+
                 // Register execution handler for Data nodes
                 rpc_server->set_handler(
                     cloudsql::network::RpcType::ExecuteFragment,
@@ -518,7 +534,8 @@ int main(int argc, char* argv[]) {
         }
 
         if (config.mode == cloudsql::config::RunMode::Data) {
-            std::cout << "Data node online. Waiting for Coordinator instructions...\n";
+            std::cout << "Data node online. Participitating in Shard groups...\n";
+            raft_manager->start();
         } else {
             /* Standalone or Coordinator mode: start PostgreSQL server */
             auto& server = get_server_instance();
@@ -545,12 +562,10 @@ int main(int argc, char* argv[]) {
 
             if (config.mode == cloudsql::config::RunMode::Coordinator) {
                 std::cout << "Coordinator node joining cluster...\n";
-                const std::string node_id = "node_" + std::to_string(config.cluster_port);
-                raft_manager = std::make_unique<cloudsql::raft::RaftManager>(node_id, *cluster_manager,
-                                                                       *rpc_server);
-
+                
                 /* Create Catalog group (ID 0) */
                 auto catalog_group = raft_manager->get_or_create_group(0);
+                catalog_group->set_state_machine(catalog.get());
 
                 /* Step 4: Link Catalog to RaftGroup */
                 catalog->set_raft_group(catalog_group.get());

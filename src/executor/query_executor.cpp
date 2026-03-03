@@ -18,9 +18,13 @@
 #include <vector>
 
 #include "catalog/catalog.hpp"
+#include "common/cluster_manager.hpp"
 #include "common/value.hpp"
+#include "distributed/raft_group.hpp"
+#include "distributed/raft_manager.hpp"
 #include "executor/operator.hpp"
 #include "executor/types.hpp"
+#include "network/rpc_message.hpp"
 #include "parser/expression.hpp"
 #include "parser/statement.hpp"
 #include "parser/token.hpp"
@@ -34,6 +38,47 @@
 #include "transaction/transaction_manager.hpp"
 
 namespace cloudsql::executor {
+
+void ShardStateMachine::apply(const raft::LogEntry& entry) {
+    if (entry.data.empty()) return;
+
+    // Binary format for Shard DML:
+    // [Type:1] (1:Insert, 2:Delete, 3:Update)
+    // [TableLen:4][TableName]
+    // [Payload...]
+    uint8_t type = entry.data[0];
+    size_t offset = 1;
+
+    uint32_t table_len = 0;
+    if (offset + 4 > entry.data.size()) return;
+    std::memcpy(&table_len, entry.data.data() + offset, 4);
+    offset += 4;
+
+    if (offset + table_len > entry.data.size()) return;
+    std::string table_name(reinterpret_cast<const char*>(entry.data.data() + offset), table_len);
+    offset += table_len;
+
+    auto table_meta_opt = catalog_.get_table_by_name(table_name);
+    if (!table_meta_opt.has_value()) return;
+    const auto* table_meta = table_meta_opt.value();
+
+    Schema schema;
+    for (const auto& col : table_meta->columns) {
+        schema.add_column(col.name, col.type);
+    }
+    storage::HeapTable table(table_name, bpm_, schema);
+
+    if (type == 1) { // INSERT
+        Tuple tuple = network::Serializer::deserialize_tuple(entry.data.data(), offset, entry.data.size());
+        table.insert(tuple, 0);
+    } else if (type == 2) { // DELETE
+        storage::HeapTable::TupleId rid;
+        if (offset + 8 > entry.data.size()) return;
+        std::memcpy(&rid.page_num, entry.data.data() + offset, 4);
+        std::memcpy(&rid.slot_num, entry.data.data() + offset + 4, 4);
+        table.remove(rid, 0);
+    }
+}
 
 QueryExecutor::QueryExecutor(Catalog& catalog, storage::BufferPoolManager& bpm,
                              transaction::LockManager& lock_manager,
@@ -258,6 +303,28 @@ QueryResult QueryExecutor::execute_insert(const parser::InsertStatement& stmt,
         }
 
         const Tuple tuple(std::move(values));
+
+        // POC: Data Replication Logic
+        if (cluster_manager_ != nullptr && cluster_manager_->get_raft_manager() != nullptr) {
+            // Find shard group (assume shard 1 for POC)
+            auto shard_group = cluster_manager_->get_raft_manager()->get_group(1); 
+            if (shard_group && shard_group->is_leader()) {
+                std::vector<uint8_t> cmd;
+                cmd.push_back(1); // Type 1: INSERT
+                uint32_t tlen = static_cast<uint32_t>(table_name.size());
+                size_t off = cmd.size();
+                cmd.resize(off + 4 + tlen);
+                std::memcpy(cmd.data() + off, &tlen, 4);
+                std::memcpy(cmd.data() + off + 4, table_name.data(), tlen);
+                network::Serializer::serialize_tuple(tuple, cmd);
+                
+                if (!shard_group->replicate(cmd)) {
+                    result.set_error("Replication failed for shard 1");
+                    return result;
+                }
+            }
+        }
+        
         const auto tid = table.insert(tuple, xmin);
 
         /* Log INSERT */
@@ -321,6 +388,27 @@ QueryResult QueryExecutor::execute_delete(const parser::DeleteStatement& stmt,
 
     /* Phase 2: Apply Deletions */
     for (const auto& rid : target_rids) {
+        // POC: Replication Logic
+        if (cluster_manager_ != nullptr && cluster_manager_->get_raft_manager() != nullptr) {
+            auto shard_group = cluster_manager_->get_raft_manager()->get_group(1); 
+            if (shard_group && shard_group->is_leader()) {
+                std::vector<uint8_t> cmd;
+                cmd.push_back(2); // Type 2: DELETE
+                uint32_t tlen = static_cast<uint32_t>(table_name.size());
+                size_t off = cmd.size();
+                cmd.resize(off + 4 + tlen + 8);
+                std::memcpy(cmd.data() + off, &tlen, 4);
+                std::memcpy(cmd.data() + off + 4, table_name.data(), tlen);
+                std::memcpy(cmd.data() + off + 4 + tlen, &rid.page_num, 4);
+                std::memcpy(cmd.data() + off + 4 + tlen + 4, &rid.slot_num, 4);
+                
+                if (!shard_group->replicate(cmd)) {
+                    result.set_error("Replication failed for shard 1");
+                    return result;
+                }
+            }
+        }
+
         /* Retrieve old tuple for logging */
         Tuple old_tuple;
         if (log_manager_ != nullptr && txn != nullptr) {

@@ -7,6 +7,7 @@
 
 #include <sys/socket.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -24,6 +25,20 @@ constexpr int HEARTBEAT_INTERVAL_MS = 50;
 constexpr int ELECTION_RETRY_MS = 100;
 constexpr size_t VOTE_REPLY_SIZE = 9;
 constexpr size_t APPEND_REPLY_SIZE = 9;
+
+/**
+ * @brief Simple helper to serialize a LogEntry
+ */
+void serialize_entry(const LogEntry& entry, std::vector<uint8_t>& out) {
+    size_t offset = out.size();
+    out.resize(offset + 24 + entry.data.size());
+    std::memcpy(out.data() + offset, &entry.term, 8);
+    std::memcpy(out.data() + offset + 8, &entry.index, 8);
+    uint64_t data_len = entry.data.size();
+    std::memcpy(out.data() + offset + 16, &data_len, 8);
+    std::memcpy(out.data() + offset + 24, entry.data.data(), data_len);
+}
+
 }  // namespace
 
 RaftGroup::RaftGroup(uint16_t group_id, std::string node_id, cluster::ClusterManager& cluster_manager,
@@ -33,6 +48,7 @@ RaftGroup::RaftGroup(uint16_t group_id, std::string node_id, cluster::ClusterMan
       cluster_manager_(cluster_manager),
       rpc_server_(rpc_server),
       rng_(std::random_device{}()) {
+    // Initial state
     last_heartbeat_ = std::chrono::system_clock::now();
 }
 
@@ -43,7 +59,6 @@ RaftGroup::~RaftGroup() {
 void RaftGroup::start() {
     running_ = true;
     raft_thread_ = std::thread(&RaftGroup::run_loop, this);
-    // Note: RPC handlers are now managed by RaftManager
 }
 
 void RaftGroup::stop() {
@@ -75,15 +90,13 @@ void RaftGroup::run_loop() {
 void RaftGroup::do_follower() {
     const auto timeout = get_random_timeout();
     std::unique_lock<std::mutex> lock(mutex_);
-    if (cv_.wait_for(lock, timeout, [this] {
-            return !running_ ||
-                   (std::chrono::system_clock::now() - last_heartbeat_ > get_random_timeout());
-        })) {
-        if (!running_) {
-            return;
+    if (!cv_.wait_for(lock, timeout, [this] { return !running_; })) {
+        // Condition variable timed out - check if we missed heartbeats
+        auto now = std::chrono::system_clock::now();
+        if (now - last_heartbeat_ >= timeout) {
+            std::cout << "[" << node_id_ << "] Election timeout, becoming Candidate\n";
+            state_ = NodeState::Candidate;
         }
-        // Election timeout reached, become candidate
-        state_ = NodeState::Candidate;
     }
 }
 
@@ -97,7 +110,7 @@ void RaftGroup::do_candidate() {
     }
 
     auto peers = cluster_manager_.get_coordinators();
-    size_t votes = 1;  // Vote for self
+    size_t votes = 1;
     const size_t needed = (peers.size() / 2) + 1;
 
     RequestVoteArgs args{};
@@ -110,22 +123,13 @@ void RaftGroup::do_candidate() {
         args.last_log_term = persistent_state_.log.empty() ? 0 : persistent_state_.log.back().term;
     }
 
-    // Send RequestVote to peers
     for (const auto& peer : peers) {
-        if (peer.id == node_id_) {
-            continue;
-        }
+        if (peer.id == node_id_) continue;
 
         network::RpcClient client(peer.address, peer.cluster_port);
         if (client.connect()) {
             std::vector<uint8_t> reply_payload;
-            network::RpcHeader h;
-            h.type = network::RpcType::RequestVote;
-            h.group_id = group_id_;
-            auto payload = args.serialize();
-            h.payload_len = static_cast<uint16_t>(payload.size());
-
-            if (client.call(h.type, payload, reply_payload)) {
+            if (client.call(network::RpcType::RequestVote, args.serialize(), reply_payload, group_id_)) {
                 if (reply_payload.size() >= VOTE_REPLY_SIZE) {
                     term_t resp_term = 0;
                     std::memcpy(&resp_term, reply_payload.data(), 8);
@@ -135,20 +139,20 @@ void RaftGroup::do_candidate() {
                         step_down(resp_term);
                         return;
                     }
-                    if (granted) {
-                        votes++;
-                    }
+                    if (granted) votes++;
                 }
             }
         }
     }
 
     if (votes >= needed) {
+        std::cout << "[" << node_id_ << "] Elected Leader for term " << persistent_state_.current_term << "\n";
         state_ = NodeState::Leader;
-        // Initialize leader state
+        cluster_manager_.set_leader(group_id_, node_id_);
         const std::scoped_lock<std::mutex> lock(mutex_);
         for (const auto& peer : peers) {
-            leader_state_.next_index[peer.id] = persistent_state_.log.size() + 1;
+            leader_state_.next_index[peer.id] =
+                persistent_state_.log.empty() ? 1 : persistent_state_.log.back().index + 1;
             leader_state_.match_index[peer.id] = 0;
         }
     } else {
@@ -159,22 +163,19 @@ void RaftGroup::do_candidate() {
 void RaftGroup::do_leader() {
     auto peers = cluster_manager_.get_coordinators();
     for (const auto& peer : peers) {
-        if (peer.id == node_id_) {
-            continue;
-        }
-        // Send Heartbeat (AppendEntries with no entries)
-        std::vector<uint8_t> args_payload(24, 0);  // Minimal heartbeat
+        if (peer.id == node_id_) continue;
+
+        std::vector<uint8_t> payload(32, 0);
         {
             const std::scoped_lock<std::mutex> lock(mutex_);
-            const term_t t = persistent_state_.current_term;
-            std::memcpy(args_payload.data(), &t, 8);
+            std::memcpy(payload.data(), &persistent_state_.current_term, 8);
+            uint64_t id_len = node_id_.size();
+            std::memcpy(payload.data() + 8, &id_len, 8);
         }
 
         network::RpcClient client(peer.address, peer.cluster_port);
         if (client.connect()) {
-            // Note: In a full multi-raft implementation, we'd need to set the group_id in header.
-            // For now, RpcClient::send_only doesn't take group_id. We'll need to update it.
-            static_cast<void>(client.send_only(network::RpcType::AppendEntries, args_payload));
+            static_cast<void>(client.send_only(network::RpcType::AppendEntries, payload, group_id_));
         }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(HEARTBEAT_INTERVAL_MS));
@@ -183,9 +184,7 @@ void RaftGroup::do_leader() {
 void RaftGroup::handle_request_vote(const network::RpcHeader& header,
                                     const std::vector<uint8_t>& payload, int client_fd) {
     (void)header;
-    if (payload.size() < 24) {
-        return;
-    }
+    if (payload.size() < 24) return;
 
     term_t term = 0;
     uint64_t id_len = 0;
@@ -198,9 +197,7 @@ void RaftGroup::handle_request_vote(const network::RpcHeader& header,
     reply.term = persistent_state_.current_term;
     reply.vote_granted = false;
 
-    if (term > persistent_state_.current_term) {
-        step_down(term);
-    }
+    if (term > persistent_state_.current_term) step_down(term);
 
     if (term == persistent_state_.current_term &&
         (persistent_state_.voted_for.empty() || persistent_state_.voted_for == candidate_id)) {
@@ -208,29 +205,29 @@ void RaftGroup::handle_request_vote(const network::RpcHeader& header,
         persist_state();
         reply.vote_granted = true;
         last_heartbeat_ = std::chrono::system_clock::now();
+        cv_.notify_all();
     }
 
-    std::vector<uint8_t> out(VOTE_REPLY_SIZE);
-    std::memcpy(out.data(), &reply.term, 8);
-    out[8] = reply.vote_granted ? 1 : 0;
+    if (client_fd >= 0) {
+        std::vector<uint8_t> out(VOTE_REPLY_SIZE);
+        std::memcpy(out.data(), &reply.term, 8);
+        out[8] = reply.vote_granted ? 1 : 0;
 
-    // Send response back
-    network::RpcHeader resp_h;
-    resp_h.type = network::RpcType::RequestVote;
-    resp_h.group_id = group_id_;
-    resp_h.payload_len = static_cast<uint16_t>(VOTE_REPLY_SIZE);
-    char h_buf[RpcHeader::HEADER_SIZE];
-    resp_h.encode(h_buf);
-    static_cast<void>(send(client_fd, h_buf, RpcHeader::HEADER_SIZE, 0));
-    static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+        network::RpcHeader resp_h;
+        resp_h.type = network::RpcType::RequestVote;
+        resp_h.group_id = group_id_;
+        resp_h.payload_len = static_cast<uint16_t>(VOTE_REPLY_SIZE);
+        char h_buf[network::RpcHeader::HEADER_SIZE];
+        resp_h.encode(h_buf);
+        static_cast<void>(send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0));
+        static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+    }
 }
 
 void RaftGroup::handle_append_entries(const network::RpcHeader& header,
                                       const std::vector<uint8_t>& payload, int client_fd) {
     (void)header;
-    if (payload.size() < 8) {
-        return;
-    }
+    if (payload.size() < 8) return;
 
     term_t term = 0;
     std::memcpy(&term, payload.data(), 8);
@@ -241,26 +238,39 @@ void RaftGroup::handle_append_entries(const network::RpcHeader& header,
     reply.success = false;
 
     if (term >= persistent_state_.current_term) {
-        if (term > persistent_state_.current_term) {
-            step_down(term);
-        }
+        if (term > persistent_state_.current_term) step_down(term);
         state_ = NodeState::Follower;
         last_heartbeat_ = std::chrono::system_clock::now();
+        cv_.notify_all();
         reply.success = true;
+
+        if (state_machine_) {
+            while (volatile_state_.last_applied < volatile_state_.commit_index) {
+                volatile_state_.last_applied++;
+                for (const auto& entry : persistent_state_.log) {
+                    if (entry.index == volatile_state_.last_applied) {
+                        state_machine_->apply(entry);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    std::vector<uint8_t> out(APPEND_REPLY_SIZE);
-    std::memcpy(out.data(), &reply.term, 8);
-    out[8] = reply.success ? 1 : 0;
+    if (client_fd >= 0) {
+        std::vector<uint8_t> out(APPEND_REPLY_SIZE);
+        std::memcpy(out.data(), &reply.term, 8);
+        out[8] = reply.success ? 1 : 0;
 
-    network::RpcHeader resp_h;
-    resp_h.type = network::RpcType::AppendEntries;
-    resp_h.group_id = group_id_;
-    resp_h.payload_len = static_cast<uint16_t>(APPEND_REPLY_SIZE);
-    char h_buf[RpcHeader::HEADER_SIZE];
-    resp_h.encode(h_buf);
-    static_cast<void>(send(fd, h_buf, RpcHeader::HEADER_SIZE, 0));
-    static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+        network::RpcHeader resp_h;
+        resp_h.type = network::RpcType::AppendEntries;
+        resp_h.group_id = group_id_;
+        resp_h.payload_len = static_cast<uint16_t>(APPEND_REPLY_SIZE);
+        char h_buf[network::RpcHeader::HEADER_SIZE];
+        resp_h.encode(h_buf);
+        static_cast<void>(send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0));
+        static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+    }
 }
 
 void RaftGroup::step_down(term_t new_term) {
@@ -279,11 +289,16 @@ std::chrono::milliseconds RaftGroup::get_random_timeout() const {
 void RaftGroup::persist_state() { /* TODO */ }
 void RaftGroup::load_state() { /* TODO */ }
 
-bool RaftGroup::replicate(const std::string& command) {
-    if (state_.load() != NodeState::Leader) {
-        return false;
-    }
-    (void)command;
+bool RaftGroup::replicate(const std::vector<uint8_t>& data) {
+    if (state_.load() != NodeState::Leader) return false;
+    
+    std::scoped_lock<std::mutex> lock(mutex_);
+    LogEntry entry;
+    entry.term = persistent_state_.current_term;
+    entry.index = persistent_state_.log.empty() ? 1 : persistent_state_.log.back().index + 1;
+    entry.data = data;
+    persistent_state_.log.push_back(std::move(entry));
+    persist_state();
     return true;
 }
 
