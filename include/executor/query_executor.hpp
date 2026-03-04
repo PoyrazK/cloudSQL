@@ -8,6 +8,7 @@
 
 #include "catalog/catalog.hpp"
 #include "common/cluster_manager.hpp"
+#include "distributed/raft_types.hpp"
 #include "executor/operator.hpp"
 #include "executor/types.hpp"
 #include "parser/statement.hpp"
@@ -16,6 +17,22 @@
 #include "transaction/transaction_manager.hpp"
 
 namespace cloudsql::executor {
+
+/**
+ * @brief State machine for a specific data shard
+ */
+class ShardStateMachine : public raft::RaftStateMachine {
+   public:
+    ShardStateMachine(std::string table_name, storage::BufferPoolManager& bpm, Catalog& catalog)
+        : table_name_(std::move(table_name)), bpm_(bpm), catalog_(catalog) {}
+
+    void apply(const raft::LogEntry& entry) override;
+
+   private:
+    std::string table_name_;
+    storage::BufferPoolManager& bpm_;
+    Catalog& catalog_;
+};
 
 /**
  * @brief Top-level executor that coordinates planning and operator execution

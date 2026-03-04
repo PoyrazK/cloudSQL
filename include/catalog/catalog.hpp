@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "common/value.hpp"
+#include "distributed/raft_types.hpp"
 
 namespace cloudsql {
 
@@ -76,6 +77,8 @@ struct ShardInfo {
     uint32_t shard_id;
     std::string node_address;
     uint16_t port;
+    std::vector<std::string> replicas; // List of node IDs
+    std::string leader_id;             // Current Raft leader
 };
 
 /**
@@ -86,7 +89,7 @@ struct TableInfo {
     std::string name;
     std::vector<ColumnInfo> columns;
     std::vector<IndexInfo> indexes;
-    std::vector<ShardInfo> shards;  // New: Shard mapping
+    std::vector<ShardInfo> shards;  // Shard mapping
     uint64_t num_rows = 0;
     std::string filename;
     uint32_t flags = 0;
@@ -145,8 +148,13 @@ struct DatabaseInfo {
 /**
  * @brief System Catalog class
  */
-class Catalog {
+class Catalog : public raft::RaftStateMachine {
    public:
+    /**
+     * @brief Apply a committed log entry (from RaftStateMachine)
+     */
+    void apply(const raft::LogEntry& entry) override;
+    
     /**
      * @brief Default constructor
      */

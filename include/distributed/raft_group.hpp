@@ -39,6 +39,11 @@ class RaftGroup {
     void start();
     void stop();
 
+    /**
+     * @brief Set the state machine to apply committed entries to
+     */
+    void set_state_machine(RaftStateMachine* state_machine) { state_machine_ = state_machine; }
+
     // Raft RPC Handlers (called by RaftManager)
     void handle_request_vote(const network::RpcHeader& header, const std::vector<uint8_t>& payload,
                              int client_fd);
@@ -46,7 +51,7 @@ class RaftGroup {
                                const std::vector<uint8_t>& payload, int client_fd);
 
     // Client interface
-    bool replicate(const std::string& command);
+    bool replicate(const std::vector<uint8_t>& data);
     [[nodiscard]] bool is_leader() const { return state_.load() == NodeState::Leader; }
     [[nodiscard]] uint16_t group_id() const { return group_id_; }
 
@@ -67,6 +72,7 @@ class RaftGroup {
     std::string node_id_;
     cluster::ClusterManager& cluster_manager_;
     network::RpcServer& rpc_server_;
+    RaftStateMachine* state_machine_ = nullptr;
 
     // State
     std::atomic<NodeState> state_{NodeState::Follower};

@@ -30,7 +30,20 @@ enum class NodeState : uint8_t { Follower, Candidate, Leader, Shutdown };
 struct LogEntry {
     term_t term = 0;
     index_t index = 0;
-    std::string data;  // Serialized command (e.g., DDL SQL)
+    std::vector<uint8_t> data;  // Binary payload
+};
+
+/**
+ * @brief Interface for the state machine that Raft replicates to
+ */
+class RaftStateMachine {
+   public:
+    virtual ~RaftStateMachine() = default;
+
+    /**
+     * @brief Apply a committed log entry to the state machine
+     */
+    virtual void apply(const LogEntry& entry) = 0;
 };
 
 /**

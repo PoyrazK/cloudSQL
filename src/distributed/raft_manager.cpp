@@ -59,9 +59,16 @@ std::shared_ptr<RaftGroup> RaftManager::get_group(uint16_t group_id) {
 
 void RaftManager::handle_raft_rpc(const network::RpcHeader& header,
                                  const std::vector<uint8_t>& payload, int client_fd) {
-    auto group = get_group(header.group_id);
+    std::shared_ptr<RaftGroup> group;
+    {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        auto it = groups_.find(header.group_id);
+        if (it != groups_.end()) {
+            group = it->second;
+        }
+    }
+
     if (!group) {
-        // Drop packet or log error
         return;
     }
 
