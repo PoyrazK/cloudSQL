@@ -42,6 +42,7 @@ set(CORE_SOURCES
     src/transaction/lock_manager.cpp
     src/transaction/transaction_manager.cpp
     src/recovery/log_manager.cpp
+    src/recovery/log_record.cpp
     src/recovery/recovery_manager.cpp
     src/distributed/raft_group.cpp
     src/distributed/raft_manager.cpp
