@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(STRICT_LINT "Enable strict linting" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(BUILD_COVERAGE "Enable code coverage reporting" OFF)
 
 # Add include directories
 include_directories(include)
@@ -50,6 +51,12 @@ set(CORE_SOURCES
 )
 
 add_library(sqlEngineCore ${CORE_SOURCES})
+
+# Coverage
+if(BUILD_COVERAGE)
+    target_compile_options(sqlEngineCore PUBLIC --coverage -O0)
+    target_link_libraries(sqlEngineCore PUBLIC --coverage)
+endif()
 
 # Sanitizers
 if(ENABLE_ASAN)
