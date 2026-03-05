@@ -16,6 +16,11 @@
 namespace cloudsql::executor {
 
 /**
+ * @brief Execution state
+ */
+enum class ExecState : uint8_t { Init, Open, Executing, Done, Error };
+
+/**
  * @brief Tuple (row) structure
  */
 class Tuple {
@@ -54,6 +59,74 @@ class Tuple {
     [[nodiscard]] std::vector<common::Value>& values() { return values_; }
 
     [[nodiscard]] std::string to_string() const;
+};
+
+/**
+ * @brief Vector of data for a single column (Vectorized Execution)
+ */
+class ColumnVector {
+   protected:
+    common::ValueType type_;
+    size_t size_ = 0;
+    std::vector<bool> null_bitmap_;
+
+   public:
+    explicit ColumnVector(common::ValueType type) : type_(type) {}
+    virtual ~ColumnVector() = default;
+
+    [[nodiscard]] common::ValueType type() const { return type_; }
+    [[nodiscard]] size_t size() const { return size_; }
+    [[nodiscard]] bool is_null(size_t index) const { return null_bitmap_[index]; }
+
+    virtual void append(const common::Value& val) = 0;
+    virtual common::Value get(size_t index) const = 0;
+    virtual void clear() {
+        size_ = 0;
+        null_bitmap_.clear();
+    }
+};
+
+/**
+ * @brief Template for fixed-width column vectors
+ */
+template <typename T>
+class NumericVector : public ColumnVector {
+   private:
+    std::vector<T> data_;
+
+   public:
+    explicit NumericVector(common::ValueType type) : ColumnVector(type) {}
+
+    void append(const common::Value& val) override {
+        if (val.is_null()) {
+            null_bitmap_.push_back(true);
+            data_.push_back(T{});
+        } else {
+            null_bitmap_.push_back(false);
+            if constexpr (std::is_same_v<T, int64_t>) {
+                data_.push_back(val.as_int64());
+            } else if constexpr (std::is_same_v<T, double>) {
+                data_.push_back(val.as_float64());
+            } else if constexpr (std::is_same_v<T, bool>) {
+                data_.push_back(val.as_bool());
+            }
+        }
+        size_++;
+    }
+
+    common::Value get(size_t index) const override {
+        if (null_bitmap_[index]) return common::Value::make_null();
+        if constexpr (std::is_same_v<T, int64_t>) return common::Value::make_int64(data_[index]);
+        if constexpr (std::is_same_v<T, double>) return common::Value::make_float64(data_[index]);
+        if constexpr (std::is_same_v<T, bool>) return common::Value::make_bool(data_[index]);
+        return common::Value::make_null();
+    }
+
+    const T* raw_data() const { return data_.data(); }
+    void clear() override {
+        ColumnVector::clear();
+        data_.clear();
+    }
 };
 
 /**
@@ -129,6 +202,56 @@ class Schema {
     [[nodiscard]] std::vector<ColumnMeta>& columns() { return columns_; }
 
     [[nodiscard]] bool operator==(const Schema& other) const { return columns_ == other.columns_; }
+};
+
+/**
+ * @brief Batch of rows in columnar format
+ */
+class VectorBatch {
+   private:
+    std::vector<std::unique_ptr<ColumnVector>> columns_;
+    size_t row_count_ = 0;
+
+   public:
+    VectorBatch() = default;
+
+    void add_column(std::unique_ptr<ColumnVector> col) { columns_.push_back(std::move(col)); }
+    [[nodiscard]] size_t column_count() const { return columns_.size(); }
+    [[nodiscard]] size_t row_count() const { return row_count_; }
+
+    ColumnVector& get_column(size_t index) { return *columns_[index]; }
+
+    void set_row_count(size_t count) { row_count_ = count; }
+
+    /**
+     * @brief Create a VectorBatch matching a schema
+     */
+    static std::unique_ptr<VectorBatch> create(const Schema& schema) {
+        auto batch = std::make_unique<VectorBatch>();
+        for (const auto& col : schema.columns()) {
+            if (col.type() == common::ValueType::TYPE_INT64) {
+                batch->add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
+            } else if (col.type() == common::ValueType::TYPE_FLOAT64) {
+                batch->add_column(std::make_unique<NumericVector<double>>(col.type()));
+            } else if (col.type() == common::ValueType::TYPE_BOOL) {
+                batch->add_column(std::make_unique<NumericVector<bool>>(col.type()));
+            }
+            // Add other types as needed
+        }
+        return batch;
+    }
+
+    void append_tuple(const Tuple& tuple) {
+        for (size_t i = 0; i < tuple.size(); ++i) {
+            columns_[i]->append(tuple.get(i));
+        }
+        row_count_++;
+    }
+
+    void clear() {
+        for (auto& col : columns_) col->clear();
+        row_count_ = 0;
+    }
 };
 
 /**
