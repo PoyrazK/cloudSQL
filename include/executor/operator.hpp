@@ -43,11 +43,6 @@ enum class OperatorType : uint8_t {
 };
 
 /**
- * @brief Execution state
- */
-enum class ExecState : uint8_t { Init, Open, Executing, Done, Error };
-
-/**
  * @brief Base operator class (Volcano iterator model)
  */
 class Operator {
