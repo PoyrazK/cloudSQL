@@ -110,10 +110,7 @@ oid_t Catalog::create_table(const std::string& table_name, std::vector<ColumnInf
 
 oid_t Catalog::create_table_local(const std::string& table_name, std::vector<ColumnInfo> columns) {
     if (table_exists_by_name(table_name)) {
-        // Return existing OID if it exists (for idempotency in Raft replay)
-        for (auto& pair : tables_) {
-            if (pair.second->name == table_name) return pair.first;
-        }
+        throw std::runtime_error("Table already exists: " + table_name);
     }
 
     auto table = std::make_unique<TableInfo>();
@@ -192,7 +189,11 @@ void Catalog::apply(const raft::LogEntry& entry) {
             columns.emplace_back(cname, ctype, cpos);
         }
 
-        create_table_local(table_name, std::move(columns));
+        try {
+            create_table_local(table_name, std::move(columns));
+        } catch (const std::exception& e) {
+            // Ignore duplicate table errors during Raft replay
+        }
     } else if (type == 2) {  // DropTable
         oid_t table_id = 0;
         std::memcpy(&table_id, entry.data.data() + 1, 4);
