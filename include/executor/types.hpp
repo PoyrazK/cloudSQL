@@ -21,6 +21,86 @@ namespace cloudsql::executor {
 enum class ExecState : uint8_t { Init, Open, Executing, Done, Error };
 
 /**
+ * @brief Aggregate types
+ */
+enum class AggregateType : uint8_t { Count, Sum, Avg, Min, Max };
+
+/**
+ * @brief Column metadata
+ */
+class ColumnMeta {
+   private:
+    std::string name_;
+    common::ValueType type_ = common::ValueType::TYPE_NULL;
+    bool nullable_ = true;
+
+   public:
+    ColumnMeta() = default;
+    ColumnMeta(std::string name, common::ValueType type, bool nullable = true)
+        : name_(std::move(name)), type_(type), nullable_(nullable) {}
+
+    [[nodiscard]] const std::string& name() const { return name_; }
+    [[nodiscard]] common::ValueType type() const { return type_; }
+    [[nodiscard]] bool nullable() const { return nullable_; }
+
+    void set_name(std::string name) { name_ = std::move(name); }
+    void set_type(common::ValueType type) { type_ = type; }
+    void set_nullable(bool nullable) { nullable_ = nullable; }
+
+    [[nodiscard]] bool operator==(const ColumnMeta& other) const {
+        return name_ == other.name_ && type_ == other.type_ && nullable_ == other.nullable_;
+    }
+    [[nodiscard]] bool operator!=(const ColumnMeta& other) const { return !(*this == other); }
+};
+
+/**
+ * @brief Schema definition
+ */
+class Schema {
+   private:
+    std::vector<ColumnMeta> columns_;
+
+   public:
+    Schema() = default;
+    explicit Schema(std::vector<ColumnMeta> columns) : columns_(std::move(columns)) {}
+
+    void add_column(const ColumnMeta& col) { columns_.push_back(col); }
+    void add_column(std::string name, common::ValueType type, bool nullable = true) {
+        columns_.emplace_back(std::move(name), type, nullable);
+    }
+
+    [[nodiscard]] size_t column_count() const { return columns_.size(); }
+    [[nodiscard]] const ColumnMeta& get_column(size_t index) const { return columns_.at(index); }
+    [[nodiscard]] size_t find_column(const std::string& name) const {
+        /* 1. Try exact match */
+        for (size_t i = 0; i < columns_.size(); i++) {
+            if (columns_[i].name() == name) {
+                return i;
+            }
+        }
+
+        /* 2. Try suffix match (for unqualified names in joined schemas) */
+        if (name.find('.') == std::string::npos) {
+            const std::string suffix = "." + name;
+            for (size_t i = 0; i < columns_.size(); i++) {
+                const std::string& col_name = columns_[i].name();
+                if (col_name.size() > suffix.size() &&
+                    col_name.compare(col_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                    return i;
+                }
+            }
+        }
+
+        return static_cast<size_t>(-1);
+    }
+
+    [[nodiscard]] const std::vector<ColumnMeta>& columns() const { return columns_; }
+    [[nodiscard]] std::vector<ColumnMeta>& columns() { return columns_; }
+
+    [[nodiscard]] bool operator==(const Schema& other) const { return columns_ == other.columns_; }
+};
+
+/**
  * @brief Tuple (row) structure
  */
 class Tuple {
@@ -127,81 +207,6 @@ class NumericVector : public ColumnVector {
         ColumnVector::clear();
         data_.clear();
     }
-};
-
-/**
- * @brief Column metadata
- */
-class ColumnMeta {
-   private:
-    std::string name_;
-    common::ValueType type_ = common::ValueType::TYPE_NULL;
-    bool nullable_ = true;
-
-   public:
-    ColumnMeta() = default;
-    ColumnMeta(std::string name, common::ValueType type, bool nullable = true)
-        : name_(std::move(name)), type_(type), nullable_(nullable) {}
-
-    [[nodiscard]] const std::string& name() const { return name_; }
-    [[nodiscard]] common::ValueType type() const { return type_; }
-    [[nodiscard]] bool nullable() const { return nullable_; }
-
-    void set_name(std::string name) { name_ = std::move(name); }
-    void set_type(common::ValueType type) { type_ = type; }
-    void set_nullable(bool nullable) { nullable_ = nullable; }
-
-    [[nodiscard]] bool operator==(const ColumnMeta& other) const {
-        return name_ == other.name_ && type_ == other.type_ && nullable_ == other.nullable_;
-    }
-    [[nodiscard]] bool operator!=(const ColumnMeta& other) const { return !(*this == other); }
-};
-
-/**
- * @brief Schema definition
- */
-class Schema {
-   private:
-    std::vector<ColumnMeta> columns_;
-
-   public:
-    Schema() = default;
-    explicit Schema(std::vector<ColumnMeta> columns) : columns_(std::move(columns)) {}
-
-    void add_column(const ColumnMeta& col) { columns_.push_back(col); }
-    void add_column(std::string name, common::ValueType type, bool nullable = true) {
-        columns_.emplace_back(std::move(name), type, nullable);
-    }
-
-    [[nodiscard]] size_t column_count() const { return columns_.size(); }
-    [[nodiscard]] const ColumnMeta& get_column(size_t index) const { return columns_.at(index); }
-    [[nodiscard]] size_t find_column(const std::string& name) const {
-        /* 1. Try exact match */
-        for (size_t i = 0; i < columns_.size(); i++) {
-            if (columns_[i].name() == name) {
-                return i;
-            }
-        }
-
-        /* 2. Try suffix match (for unqualified names in joined schemas) */
-        if (name.find('.') == std::string::npos) {
-            const std::string suffix = "." + name;
-            for (size_t i = 0; i < columns_.size(); i++) {
-                const std::string& col_name = columns_[i].name();
-                if (col_name.size() > suffix.size() &&
-                    col_name.compare(col_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
-                    return i;
-                }
-            }
-        }
-
-        return static_cast<size_t>(-1);
-    }
-
-    [[nodiscard]] const std::vector<ColumnMeta>& columns() const { return columns_; }
-    [[nodiscard]] std::vector<ColumnMeta>& columns() { return columns_; }
-
-    [[nodiscard]] bool operator==(const Schema& other) const { return columns_ == other.columns_; }
 };
 
 /**

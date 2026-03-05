@@ -238,11 +238,6 @@ class SortOperator : public Operator {
 };
 
 /**
- * @brief Aggregate types
- */
-enum class AggregateType : uint8_t { Count, Sum, Avg, Min, Max };
-
-/**
  * @brief Aggregate specification
  */
 struct AggregateInfo {
