@@ -198,7 +198,7 @@ std::string StorageManager::get_full_path(const std::string& filename) const {
  * @brief Check if a file exists on disk.
  */
 bool StorageManager::file_exists(const std::string& filename) const {
-    struct stat st{};
+    struct stat st {};
     return stat(get_full_path(filename).c_str(), &st) == 0;
 }
 
@@ -206,7 +206,7 @@ bool StorageManager::file_exists(const std::string& filename) const {
  * @brief Create data directory if it doesn't exist
  */
 bool StorageManager::create_dir_if_not_exists() {
-    struct stat st{};
+    struct stat st {};
     if (stat(data_dir_.c_str(), &st) != 0) {
         if (mkdir(data_dir_.c_str(), DEFAULT_DIR_MODE) != 0) {
             return false;
