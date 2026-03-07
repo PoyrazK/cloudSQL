@@ -151,15 +151,7 @@ class VectorizedProjectOperator : public VectorizedOperator {
         if (child_->next_batch(*input_batch_)) {
             // Pre-allocate result columns if out_batch is empty
             if (out_batch.column_count() == 0) {
-                for (const auto& col : output_schema_.columns()) {
-                    if (col.type() == common::ValueType::TYPE_INT64) {
-                        out_batch.add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
-                    } else if (col.type() == common::ValueType::TYPE_FLOAT64) {
-                        out_batch.add_column(std::make_unique<NumericVector<double>>(col.type()));
-                    } else if (col.type() == common::ValueType::TYPE_BOOL) {
-                        out_batch.add_column(std::make_unique<NumericVector<bool>>(col.type()));
-                    }
-                }
+                out_batch.init_from_schema(output_schema_);
             }
 
             for (size_t i = 0; i < expressions_.size(); ++i) {

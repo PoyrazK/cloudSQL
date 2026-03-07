@@ -239,31 +239,40 @@ class VectorBatch {
     void set_row_count(size_t count) { row_count_ = count; }
 
     /**
-     * @brief Create a VectorBatch matching a schema
+     * @brief Initialize batch columns from a schema
      */
-    static std::unique_ptr<VectorBatch> create(const Schema& schema) {
-        auto batch = std::make_unique<VectorBatch>();
+    void init_from_schema(const Schema& schema) {
+        clear();
+        columns_.clear();
         for (const auto& col : schema.columns()) {
             switch (col.type()) {
                 case common::ValueType::TYPE_INT8:
                 case common::ValueType::TYPE_INT16:
                 case common::ValueType::TYPE_INT32:
                 case common::ValueType::TYPE_INT64:
-                    batch->add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
+                    add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
                     break;
                 case common::ValueType::TYPE_FLOAT32:
                 case common::ValueType::TYPE_FLOAT64:
-                    batch->add_column(std::make_unique<NumericVector<double>>(col.type()));
+                    add_column(std::make_unique<NumericVector<double>>(col.type()));
                     break;
                 case common::ValueType::TYPE_BOOL:
-                    batch->add_column(std::make_unique<NumericVector<bool>>(col.type()));
+                    add_column(std::make_unique<NumericVector<bool>>(col.type()));
                     break;
                 default:
                     // Fallback to INT64 for unknown numeric types
-                    batch->add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
+                    add_column(std::make_unique<NumericVector<int64_t>>(col.type()));
                     break;
             }
         }
+    }
+
+    /**
+     * @brief Create a VectorBatch matching a schema
+     */
+    static std::unique_ptr<VectorBatch> create(const Schema& schema) {
+        auto batch = std::make_unique<VectorBatch>();
+        batch->init_from_schema(schema);
         return batch;
     }
 
