@@ -7,6 +7,7 @@
 #define CLOUDSQL_EXECUTOR_VECTORIZED_OPERATOR_HPP
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -102,23 +103,33 @@ class VectorizedFilterOperator : public VectorizedOperator {
 
     bool next_batch(VectorBatch& out_batch) override {
         out_batch.clear();
+        if (out_batch.column_count() == 0) {
+            out_batch.init_from_schema(output_schema_);
+        }
+
         while (child_->next_batch(*input_batch_)) {
             selection_mask_->clear();
             condition_->evaluate_vectorized(*input_batch_, child_->output_schema(),
                                             *selection_mask_);
 
+            std::vector<size_t> selection;
             for (size_t r = 0; r < input_batch_->row_count(); ++r) {
-                if (selection_mask_->get(r).as_bool()) {
-                    // Optimized: append row from input_batch to out_batch
-                    std::vector<common::Value> row_vals;
-                    for (size_t c = 0; c < input_batch_->column_count(); ++c) {
-                        row_vals.push_back(input_batch_->get_column(c).get(r));
-                    }
-                    out_batch.append_tuple(Tuple(std::move(row_vals)));
+                common::Value val = selection_mask_->get(r);
+                if (!val.is_null() && val.as_bool()) {
+                    selection.push_back(r);
                 }
             }
 
-            if (out_batch.row_count() > 0) {
+            if (!selection.empty()) {
+                // Batch-level append optimization: iterate columns once
+                for (size_t c = 0; c < input_batch_->column_count(); ++c) {
+                    auto& src_col = input_batch_->get_column(c);
+                    auto& dest_col = out_batch.get_column(c);
+                    for (size_t r : selection) {
+                        dest_col.append(src_col.get(r));
+                    }
+                }
+                out_batch.set_row_count(out_batch.row_count() + selection.size());
                 input_batch_->clear();
                 return true;
             }
@@ -182,6 +193,8 @@ class VectorizedAggregateOperator : public VectorizedOperator {
     std::unique_ptr<VectorizedOperator> child_;
     std::vector<VectorizedAggregateInfo> aggregates_;
     std::vector<int64_t> results_int_;
+    std::vector<double> results_double_;
+    std::vector<bool> has_value_;
     std::unique_ptr<VectorBatch> input_batch_;
     bool done_ = false;
 
@@ -192,6 +205,8 @@ class VectorizedAggregateOperator : public VectorizedOperator {
           child_(std::move(child)),
           aggregates_(std::move(aggregates)) {
         results_int_.assign(aggregates_.size(), 0);
+        results_double_.assign(aggregates_.size(), 0.0);
+        has_value_.assign(aggregates_.size(), false);
         input_batch_ = VectorBatch::create(child_->output_schema());
     }
 
@@ -204,15 +219,35 @@ class VectorizedAggregateOperator : public VectorizedOperator {
                 const auto& agg = aggregates_[i];
                 if (agg.type == AggregateType::Count) {
                     results_int_[i] += input_batch_->row_count();
+                    has_value_[i] = true;
                 } else if (agg.type == AggregateType::Sum && agg.input_col_idx >= 0) {
                     auto& col = input_batch_->get_column(agg.input_col_idx);
-                    auto& num_col = dynamic_cast<NumericVector<int64_t>&>(col);
-                    const int64_t* raw = num_col.raw_data();
-                    for (size_t r = 0; r < input_batch_->row_count(); ++r) {
-                        if (!num_col.is_null(r)) {
-                            results_int_[i] += raw[r];
+                    if (col.type() == common::ValueType::TYPE_INT64) {
+                        auto& num_col = dynamic_cast<NumericVector<int64_t>&>(col);
+                        const int64_t* raw = num_col.raw_data();
+                        for (size_t r = 0; r < input_batch_->row_count(); ++r) {
+                            if (!num_col.is_null(r)) {
+                                results_int_[i] += raw[r];
+                                has_value_[i] = true;
+                            }
                         }
+                    } else if (col.type() == common::ValueType::TYPE_FLOAT64) {
+                        auto& num_col = dynamic_cast<NumericVector<double>&>(col);
+                        const double* raw = num_col.raw_data();
+                        for (size_t r = 0; r < input_batch_->row_count(); ++r) {
+                            if (!num_col.is_null(r)) {
+                                results_double_[i] += raw[r];
+                                has_value_[i] = true;
+                            }
+                        }
+                    } else {
+                        set_error("SUM: Unsupported column type " +
+                                  std::to_string(static_cast<int>(col.type())));
+                        return false;
                     }
+                } else {
+                    set_error("Aggregate: Unsupported aggregate type or missing handler");
+                    return false;
                 }
             }
             input_batch_->clear();
@@ -220,11 +255,23 @@ class VectorizedAggregateOperator : public VectorizedOperator {
 
         // Produce final result batch
         out_batch.clear();
-        std::vector<common::Value> row;
-        for (int64_t val : results_int_) {
-            row.push_back(common::Value::make_int64(val));
+        if (out_batch.column_count() == 0) {
+            out_batch.init_from_schema(output_schema_);
         }
-        out_batch.append_tuple(Tuple(std::move(row)));
+
+        for (size_t i = 0; i < aggregates_.size(); ++i) {
+            if (!has_value_[i]) {
+                out_batch.get_column(i).append(common::Value::make_null());
+                continue;
+            }
+
+            if (output_schema_.get_column(i).type() == common::ValueType::TYPE_INT64) {
+                out_batch.get_column(i).append(common::Value::make_int64(results_int_[i]));
+            } else if (output_schema_.get_column(i).type() == common::ValueType::TYPE_FLOAT64) {
+                out_batch.get_column(i).append(common::Value::make_float64(results_double_[i]));
+            }
+        }
+        out_batch.set_row_count(1);
         done_ = true;
         return true;
     }

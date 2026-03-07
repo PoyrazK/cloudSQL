@@ -24,35 +24,57 @@ TEST(AnalyticsTests, ColumnarTableLifecycle) {
     StorageManager storage("./test_analytics");
     Schema schema;
     schema.add_column("id", common::ValueType::TYPE_INT64);
+    schema.add_column("maybe_val", common::ValueType::TYPE_INT64, true);
+    schema.add_column("float_val", common::ValueType::TYPE_FLOAT64);
 
-    ColumnarTable table("analytics_test", storage, schema);
+    ColumnarTable table("lifecycle_test", storage, schema);
     ASSERT_TRUE(table.create());
     ASSERT_TRUE(table.open());
 
-    // 1. Create a batch
-    VectorBatch batch;
-    auto col = std::make_unique<NumericVector<int64_t>>(common::ValueType::TYPE_INT64);
-    batch.add_column(std::move(col));
-
+    // 1. Create and populate a batch with mixed types and nulls
+    auto batch = VectorBatch::create(schema);
     for (int64_t i = 0; i < 100; ++i) {
-        batch.append_tuple(Tuple({common::Value::make_int64(i)}));
+        std::vector<common::Value> row;
+        row.push_back(common::Value::make_int64(i));
+
+        // Populate maybe_val: null for even rows, value for odd rows
+        if (i % 2 == 0) {
+            row.push_back(common::Value::make_null());
+        } else {
+            row.push_back(common::Value::make_int64(i * 10));
+        }
+
+        row.push_back(common::Value::make_float64(static_cast<double>(i) + 0.5));
+        batch->append_tuple(Tuple(std::move(row)));
     }
 
-    // 2. Append to table
-    ASSERT_TRUE(table.append_batch(batch));
+    // 2. Persist to storage
+    ASSERT_TRUE(table.append_batch(*batch));
     EXPECT_EQ(table.row_count(), 100);
 
-    // 3. Scan via vectorized operator
+    // 3. Scan and verify round-trip integrity
     auto table_ptr = std::make_shared<ColumnarTable>(table);
-    VectorizedSeqScanOperator scan("analytics_test", table_ptr);
+    VectorizedSeqScanOperator scan("lifecycle_test", table_ptr);
 
-    VectorBatch result_batch;
-    auto res_col = std::make_unique<NumericVector<int64_t>>(common::ValueType::TYPE_INT64);
-    result_batch.add_column(std::move(res_col));
+    auto result_batch = VectorBatch::create(schema);
+    ASSERT_TRUE(scan.next_batch(*result_batch));
+    EXPECT_EQ(result_batch->row_count(), 100);
 
-    ASSERT_TRUE(scan.next_batch(result_batch));
-    EXPECT_EQ(result_batch.row_count(), 100);
-    EXPECT_EQ(result_batch.get_column(0).get(50).as_int64(), 50);
+    for (size_t i = 0; i < 100; ++i) {
+        // Verify INT64 id
+        EXPECT_EQ(result_batch->get_column(0).get(i).as_int64(), static_cast<int64_t>(i));
+
+        // Verify Nullable INT64 maybe_val
+        if (i % 2 == 0) {
+            EXPECT_TRUE(result_batch->get_column(1).is_null(i));
+        } else {
+            EXPECT_EQ(result_batch->get_column(1).get(i).as_int64(), static_cast<int64_t>(i * 10));
+        }
+
+        // Verify FLOAT64 float_val (exact match for binary representation)
+        EXPECT_DOUBLE_EQ(result_batch->get_column(2).get(i).to_float64(),
+                         static_cast<double>(i) + 0.5);
+    }
 }
 
 TEST(AnalyticsTests, VectorizedExecutionPipeline) {
@@ -119,20 +141,66 @@ TEST(AnalyticsTests, VectorizedAggregation) {
     StorageManager storage("./test_analytics");
     Schema schema;
     schema.add_column("val", common::ValueType::TYPE_INT64);
+    schema.add_column("fval", common::ValueType::TYPE_FLOAT64);
 
     auto table = std::make_shared<ColumnarTable>("agg_test", storage, schema);
     ASSERT_TRUE(table->create());
     ASSERT_TRUE(table->open());
 
-    // 1. Populate table with 10 rows: [1, 2, 3, ..., 10]
+    // 1. Populate table with 10 rows: val=[1..10], fval=[1.5..10.5]
     auto input_batch = VectorBatch::create(schema);
     for (int64_t i = 1; i <= 10; ++i) {
-        input_batch->append_tuple(Tuple({common::Value::make_int64(i)}));
+        std::vector<common::Value> row;
+        row.push_back(common::Value::make_int64(i));
+        row.push_back(common::Value::make_float64(static_cast<double>(i) + 0.5));
+        input_batch->append_tuple(Tuple(std::move(row)));
+    }
+    ASSERT_TRUE(table->append_batch(*input_batch));
+
+    // 2. Build Agg Pipeline: Scan -> Aggregate(COUNT(*), SUM(val), SUM(fval))
+    auto scan = std::make_unique<VectorizedSeqScanOperator>("agg_test", table);
+
+    Schema out_schema;
+    out_schema.add_column("count", common::ValueType::TYPE_INT64);
+    out_schema.add_column("sum_i", common::ValueType::TYPE_INT64);
+    out_schema.add_column("sum_f", common::ValueType::TYPE_FLOAT64);
+
+    std::vector<VectorizedAggregateInfo> aggs = {
+        {AggregateType::Count, -1}, {AggregateType::Sum, 0}, {AggregateType::Sum, 1}};
+
+    VectorizedAggregateOperator agg(std::move(scan), std::move(out_schema), aggs);
+
+    // 3. Execute and Verify
+    auto result_batch = VectorBatch::create(agg.output_schema());
+    ASSERT_TRUE(agg.next_batch(*result_batch));
+    EXPECT_EQ(result_batch->row_count(), 1);
+
+    // COUNT(*) -> 10
+    EXPECT_EQ(result_batch->get_column(0).get(0).as_int64(), 10);
+    // SUM(val) -> 55
+    EXPECT_EQ(result_batch->get_column(1).get(0).as_int64(), 55);
+    // SUM(fval) -> (1..10) + 10*0.5 = 55 + 5 = 60.0
+    EXPECT_DOUBLE_EQ(result_batch->get_column(2).get(0).to_float64(), 60.0);
+}
+
+TEST(AnalyticsTests, AggregateNullHandling) {
+    StorageManager storage("./test_analytics");
+    Schema schema;
+    schema.add_column("val", common::ValueType::TYPE_INT64, true);
+
+    auto table = std::make_shared<ColumnarTable>("null_agg_test", storage, schema);
+    ASSERT_TRUE(table->create());
+    ASSERT_TRUE(table->open());
+
+    // 1. Populate table with 5 NULLs
+    auto input_batch = VectorBatch::create(schema);
+    for (int i = 0; i < 5; ++i) {
+        input_batch->append_tuple(Tuple({common::Value::make_null()}));
     }
     ASSERT_TRUE(table->append_batch(*input_batch));
 
     // 2. Build Agg Pipeline: Scan -> Aggregate(COUNT(*), SUM(val))
-    auto scan = std::make_unique<VectorizedSeqScanOperator>("agg_test", table);
+    auto scan = std::make_unique<VectorizedSeqScanOperator>("null_agg_test", table);
 
     Schema out_schema;
     out_schema.add_column("count", common::ValueType::TYPE_INT64);
@@ -143,12 +211,12 @@ TEST(AnalyticsTests, VectorizedAggregation) {
 
     VectorizedAggregateOperator agg(std::move(scan), std::move(out_schema), aggs);
 
-    // 3. Execute and Verify
+    // 3. Verify: COUNT(*) should be 5, SUM(val) should be NULL
     auto result_batch = VectorBatch::create(agg.output_schema());
     ASSERT_TRUE(agg.next_batch(*result_batch));
-    EXPECT_EQ(result_batch->row_count(), 1);
-    EXPECT_EQ(result_batch->get_column(0).get(0).as_int64(), 10);  // COUNT
-    EXPECT_EQ(result_batch->get_column(1).get(0).as_int64(), 55);  // SUM (1..10)
+
+    EXPECT_EQ(result_batch->get_column(0).get(0).as_int64(), 5);
+    EXPECT_TRUE(result_batch->get_column(1).is_null(0));
 }
 
 }  // namespace
