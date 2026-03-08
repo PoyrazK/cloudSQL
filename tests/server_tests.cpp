@@ -174,7 +174,7 @@ TEST(ServerTests, InvalidHandshake) {
         // Send invalid length
         const uint32_t invalid_len = htonl(3);
         send(sock, &invalid_len, 4, 0);
-        
+
         // Server should close connection due to invalid length
         char buf;
         ssize_t n = recv(sock, &buf, 1, 0);
