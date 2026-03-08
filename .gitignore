@@ -88,3 +88,4 @@ coverage/
 # Emacs
 # ==============
 .emacs.d/
+*.heap
