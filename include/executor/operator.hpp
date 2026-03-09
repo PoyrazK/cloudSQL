@@ -275,11 +275,14 @@ class AggregateOperator : public Operator {
  * @brief Hash join operator
  */
 class HashJoinOperator : public Operator {
+   public:
+   using JoinType = cloudsql::executor::JoinType;
    private:
     std::unique_ptr<Operator> left_;
     std::unique_ptr<Operator> right_;
     std::unique_ptr<parser::Expression> left_key_;
     std::unique_ptr<parser::Expression> right_key_;
+    JoinType join_type_;
     Schema schema_;
 
     /* In-memory hash table for the right side */
@@ -287,6 +290,7 @@ class HashJoinOperator : public Operator {
 
     /* Probe phase state */
     std::optional<Tuple> left_tuple_;
+    bool left_had_match_ = false;
     struct MatchIterator {
         std::unordered_multimap<std::string, Tuple>::iterator current;
         std::unordered_multimap<std::string, Tuple>::iterator end;
@@ -296,7 +300,8 @@ class HashJoinOperator : public Operator {
    public:
     HashJoinOperator(std::unique_ptr<Operator> left, std::unique_ptr<Operator> right,
                      std::unique_ptr<parser::Expression> left_key,
-                     std::unique_ptr<parser::Expression> right_key);
+                     std::unique_ptr<parser::Expression> right_key,
+                     JoinType join_type = JoinType::Inner);
 
     bool init() override;
     bool open() override;
