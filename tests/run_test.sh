@@ -1,9 +1,12 @@
-#!/usr/bin/env bash
-# cleanup function to ensure background cloudSQL process is terminated
+#!/bin/bash
+
+# cloudSQL E2E and Logic Test Runner
+# This script builds the engine and runs both Python E2E tests and SLT logic tests.
+
 cleanup() {
-    if [ -n "$SQL_PID" ]; then
-        kill $SQL_PID 2>/dev/null || true
-        wait $SQL_PID 2>/dev/null || true
+    echo "Shutting down..."
+    if [ ! -z "$SQL_PID" ]; then
+        kill $SQL_PID 2>/dev/null
     fi
 }
 
@@ -18,8 +21,21 @@ TEST_DATA_DIR="$ROOT_DIR/test_data"
 rm -rf "$TEST_DATA_DIR" || true
 mkdir -p "$TEST_DATA_DIR"
 
+# Detect CPU count for parallel make
+if command -v nproc >/dev/null 2>&1; then
+    CPU_COUNT=$(nproc)
+elif command -v sysctl >/dev/null 2>&1; then
+    CPU_COUNT=$(sysctl -n hw.ncpu)
+elif command -v getconf >/dev/null 2>&1; then
+    CPU_COUNT=$(getconf _NPROCESSORS_ONLN)
+else
+    CPU_COUNT=1
+fi
+
+echo "Detected $CPU_COUNT CPUs, building with -j$CPU_COUNT"
+
 cd "$BUILD_DIR" || exit 1
-make -j$(sysctl -n hw.ncpu)
+make -j"$CPU_COUNT"
 ./cloudSQL -p 5438 -d "$TEST_DATA_DIR" &
 SQL_PID=$!
 sleep 2
