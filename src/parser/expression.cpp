@@ -234,7 +234,16 @@ common::Value ColumnExpr::evaluate(const executor::Tuple* tuple,
         return common::Value::make_null();
     }
 
-    const size_t index = schema->find_column(name_);
+    size_t index = static_cast<size_t>(-1);
+    
+    /* 1. Try exact match (either fully qualified or just name) */
+    index = schema->find_column(this->to_string());
+    
+    /* 2. If not found and it's qualified, try just the column name */
+    if (index == static_cast<size_t>(-1) && has_table()) {
+        index = schema->find_column(name_);
+    }
+
     if (index == static_cast<size_t>(-1)) {
         return common::Value::make_null();
     }
