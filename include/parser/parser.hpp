@@ -25,6 +25,7 @@ class Parser {
 
     std::unique_ptr<Statement> parse_select();
     std::unique_ptr<Statement> parse_create_table();
+    std::unique_ptr<Statement> parse_create_index();
     std::unique_ptr<Statement> parse_insert();
     std::unique_ptr<Statement> parse_update();
     std::unique_ptr<Statement> parse_delete();

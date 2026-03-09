@@ -44,6 +44,9 @@ std::unique_ptr<Statement> Parser::parse_statement() {
             static_cast<void>(next_token());  // consume CREATE
             if (peek_token().type() == TokenType::Table) {
                 stmt = parse_create_table();
+            } else if (peek_token().type() == TokenType::Index ||
+                       peek_token().type() == TokenType::Unique) {
+                stmt = parse_create_index();
             }
             break;
         case TokenType::Insert:
@@ -329,6 +332,62 @@ std::unique_ptr<Statement> Parser::parse_create_table() {
                 break;
             }
         }
+
+        if (peek_token().type() == TokenType::RParen) {
+            break;
+        }
+    }
+
+    if (!consume(TokenType::RParen)) {
+        return nullptr;
+    }
+    return stmt;
+}
+
+/**
+ * @brief Parse CREATE INDEX statement
+ */
+std::unique_ptr<Statement> Parser::parse_create_index() {
+    auto stmt = std::make_unique<CreateIndexStatement>();
+    if (consume(TokenType::Unique)) {
+        stmt->set_unique(true);
+    }
+    if (!consume(TokenType::Index)) {
+        return nullptr;
+    }
+
+    const Token name = next_token();
+    if (name.type() != TokenType::Identifier) {
+        return nullptr;
+    }
+    stmt->set_index_name(name.lexeme());
+
+    if (!consume(TokenType::On)) {
+        return nullptr;
+    }
+
+    const Token table_name = next_token();
+    if (table_name.type() != TokenType::Identifier) {
+        return nullptr;
+    }
+    stmt->set_table_name(table_name.lexeme());
+
+    if (!consume(TokenType::LParen)) {
+        return nullptr;
+    }
+
+    bool first = true;
+    while (true) {
+        if (!first && !consume(TokenType::Comma)) {
+            break;
+        }
+        first = false;
+
+        const Token col_name = next_token();
+        if (col_name.type() != TokenType::Identifier) {
+            return nullptr;
+        }
+        stmt->add_column(col_name.lexeme());
 
         if (peek_token().type() == TokenType::RParen) {
             break;
