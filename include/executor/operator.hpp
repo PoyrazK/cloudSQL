@@ -320,7 +320,6 @@ class HashJoinOperator : public Operator {
     void add_child(std::unique_ptr<Operator> child) override;
 };
 
-
 /**
  * @brief Limit operator
  */

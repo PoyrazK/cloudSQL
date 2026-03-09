@@ -639,9 +639,11 @@ bool HashJoinOperator::next(Tuple& out_tuple) {
                 return true;
             }
 
-            /* No more matches for this left tuple. If (LEFT or FULL join) and no matches found, emit NULLs */
+            /* No more matches for this left tuple. If (LEFT or FULL join) and no matches found,
+             * emit NULLs */
             match_iter_ = std::nullopt;
-            if ((join_type_ == JoinType::Left || join_type_ == JoinType::Full) && !left_had_match_) {
+            if ((join_type_ == JoinType::Left || join_type_ == JoinType::Full) &&
+                !left_had_match_) {
                 std::vector<common::Value> joined_values = left_tuple_->values();
                 for (size_t i = 0; i < right_schema.column_count(); ++i) {
                     joined_values.push_back(common::Value::make_null());
@@ -696,7 +698,7 @@ bool HashJoinOperator::next(Tuple& out_tuple) {
                     joined_values.insert(joined_values.end(), it->second.tuple.values().begin(),
                                          it->second.tuple.values().end());
                     out_tuple = Tuple(std::move(joined_values));
-                    it->second.matched = true;  /* Mark as emitted */
+                    it->second.matched = true; /* Mark as emitted */
                     it++;
                     return true;
                 }
