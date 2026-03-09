@@ -240,6 +240,43 @@ class CreateTableStatement : public Statement {
 };
 
 /**
+ * @brief CREATE INDEX statement
+ */
+class CreateIndexStatement : public Statement {
+   private:
+    std::string index_name_;
+    std::string table_name_;
+    std::vector<std::string> columns_;
+    bool unique_ = false;
+
+   public:
+    CreateIndexStatement() = default;
+
+    [[nodiscard]] StmtType type() const override { return StmtType::CreateIndex; }
+
+    void set_index_name(std::string name) { index_name_ = std::move(name); }
+    void set_table_name(std::string name) { table_name_ = std::move(name); }
+    void add_column(std::string col) { columns_.push_back(std::move(col)); }
+    void set_unique(bool unique) { unique_ = unique; }
+
+    [[nodiscard]] const std::string& index_name() const { return index_name_; }
+    [[nodiscard]] const std::string& table_name() const { return table_name_; }
+    [[nodiscard]] const std::vector<std::string>& columns() const { return columns_; }
+    [[nodiscard]] bool unique() const { return unique_; }
+
+    [[nodiscard]] std::string to_string() const override {
+        std::string s = "CREATE ";
+        if (unique_) s += "UNIQUE ";
+        s += "INDEX " + index_name_ + " ON " + table_name_ + " (";
+        for (size_t i = 0; i < columns_.size(); ++i) {
+            s += columns_[i] + (i == columns_.size() - 1 ? "" : ", ");
+        }
+        s += ")";
+        return s;
+    }
+};
+
+/**
  * @brief DROP TABLE statement
  */
 class DropTableStatement : public Statement {
