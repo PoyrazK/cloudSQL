@@ -565,19 +565,26 @@ Schema& AggregateOperator::output_schema() {
 
 HashJoinOperator::HashJoinOperator(std::unique_ptr<Operator> left, std::unique_ptr<Operator> right,
                                    std::unique_ptr<parser::Expression> left_key,
-                                   std::unique_ptr<parser::Expression> right_key)
+                                   std::unique_ptr<parser::Expression> right_key,
+                                   executor::JoinType join_type)
     : Operator(OperatorType::HashJoin, left->get_txn(), left->get_lock_manager()),
       left_(std::move(left)),
       right_(std::move(right)),
       left_key_(std::move(left_key)),
-      right_key_(std::move(right_key)) {
+      right_key_(std::move(right_key)),
+      join_type_(join_type) {
     /* Build resulting schema */
     if (left_ && right_) {
         for (const auto& col : left_->output_schema().columns()) {
             schema_.add_column(col);
         }
         for (const auto& col : right_->output_schema().columns()) {
-            schema_.add_column(col);
+            /* Left Join results in nullable columns for the right side */
+            auto col_meta = col;
+            if (join_type_ == executor::JoinType::Left) {
+                col_meta.set_nullable(true);
+            }
+            schema_.add_column(col_meta);
         }
     }
 }
@@ -602,33 +609,41 @@ bool HashJoinOperator::open() {
 
     left_tuple_ = std::nullopt;
     match_iter_ = std::nullopt;
+    left_had_match_ = false;
     set_state(ExecState::Open);
     return true;
 }
 
 bool HashJoinOperator::next(Tuple& out_tuple) {
     auto left_schema = left_->output_schema();
+    auto right_schema = right_->output_schema();
 
     while (true) {
         if (match_iter_.has_value()) {
-            /* We are currently iterating through matches for a left tuple */
             auto& iter_state = match_iter_.value();
             if (iter_state.current != iter_state.end) {
                 const auto& right_tuple = iter_state.current->second;
+                std::vector<common::Value> joined_values = left_tuple_->values();
+                joined_values.insert(joined_values.end(), right_tuple.values().begin(),
+                                     right_tuple.values().end());
 
-                /* Concatenate left and right tuples */
-                if (left_tuple_.has_value()) {
-                    std::vector<common::Value> joined_values = left_tuple_->values();
-                    joined_values.insert(joined_values.end(), right_tuple.values().begin(),
-                                         right_tuple.values().end());
-
-                    out_tuple = Tuple(std::move(joined_values));
-                    iter_state.current++;
-                    return true;
-                }
+                out_tuple = Tuple(std::move(joined_values));
+                iter_state.current++;
+                left_had_match_ = true;
+                return true;
             }
-            /* No more matches for this left tuple */
+
+            /* No more matches for this left tuple. If LEFT join and no matches found, emit NULLs */
             match_iter_ = std::nullopt;
+            if (join_type_ == JoinType::Left && !left_had_match_) {
+                std::vector<common::Value> joined_values = left_tuple_->values();
+                for (size_t i = 0; i < right_schema.column_count(); ++i) {
+                    joined_values.push_back(common::Value::make_null());
+                }
+                out_tuple = Tuple(std::move(joined_values));
+                left_tuple_ = std::nullopt;
+                return true;
+            }
             left_tuple_ = std::nullopt;
         }
 
@@ -640,18 +655,25 @@ bool HashJoinOperator::next(Tuple& out_tuple) {
         }
 
         left_tuple_ = std::move(next_left);
-        if (left_tuple_.has_value()) {
-            const common::Value key = left_key_->evaluate(&(left_tuple_.value()), &left_schema);
+        left_had_match_ = false;
+        const common::Value key = left_key_->evaluate(&(left_tuple_.value()), &left_schema);
 
-            /* Look up in hash table */
-            auto range = hash_table_.equal_range(key.to_string());
-            if (range.first != range.second) {
-                match_iter_ = {range.first, range.second};
-                /* Continue loop to return the first match */
-            } else {
-                /* No match for this left tuple, pull next */
-                left_tuple_ = std::nullopt;
+        /* Look up in hash table */
+        auto range = hash_table_.equal_range(key.to_string());
+        if (range.first != range.second) {
+            match_iter_ = {range.first, range.second};
+        } else if (join_type_ == JoinType::Left) {
+            /* No match found immediately, emit NULLs if Left join */
+            std::vector<common::Value> joined_values = left_tuple_->values();
+            for (size_t i = 0; i < right_schema.column_count(); ++i) {
+                joined_values.push_back(common::Value::make_null());
             }
+            out_tuple = Tuple(std::move(joined_values));
+            left_tuple_ = std::nullopt;
+            return true;
+        } else {
+            /* Inner join and no match, skip to next left tuple */
+            left_tuple_ = std::nullopt;
         }
     }
 }
