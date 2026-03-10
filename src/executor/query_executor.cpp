@@ -544,7 +544,8 @@ QueryResult QueryExecutor::execute_delete(const parser::DeleteStatement& stmt,
                         uint16_t pos = idx_info.column_positions[0];
                         common::ValueType ktype = table_meta->columns[pos].type;
                         storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                        if (!apply_index_write(index, old_tuple.get(pos), rid, IndexOp::Remove, err)) {
+                        if (!apply_index_write(index, old_tuple.get(pos), rid, IndexOp::Remove,
+                                               err)) {
                             throw std::runtime_error(err);
                         }
                     }
@@ -631,7 +632,8 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
                     uint16_t pos = idx_info.column_positions[0];
                     common::ValueType ktype = table_meta->columns[pos].type;
                     storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                    if (!apply_index_write(index, op.old_tuple.get(pos), op.rid, IndexOp::Remove, err)) {
+                    if (!apply_index_write(index, op.old_tuple.get(pos), op.rid, IndexOp::Remove,
+                                           err)) {
                         throw std::runtime_error(err);
                     }
                 }
@@ -654,7 +656,8 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
                     uint16_t pos = idx_info.column_positions[0];
                     common::ValueType ktype = table_meta->columns[pos].type;
                     storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                    if (!apply_index_write(index, op.new_tuple.get(pos), new_tid, IndexOp::Insert, err)) {
+                    if (!apply_index_write(index, op.new_tuple.get(pos), new_tid, IndexOp::Insert,
+                                           err)) {
                         throw std::runtime_error(err);
                     }
                 }
@@ -750,10 +753,10 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
                         if (base_table_meta->columns[pos].name == col_name ||
                             (base_table_name + "." + base_table_meta->columns[pos].name) ==
                                 col_name) {
-                            
                             common::ValueType ktype = base_table_meta->columns[pos].type;
                             current_root = std::make_unique<IndexScanOperator>(
-                                std::make_unique<storage::HeapTable>(base_table_name, bpm_, base_schema),
+                                std::make_unique<storage::HeapTable>(base_table_name, bpm_,
+                                                                     base_schema),
                                 std::make_unique<storage::BTreeIndex>(idx_info.name, bpm_, ktype),
                                 std::move(const_val), txn, &lock_manager_);
                             index_used = true;

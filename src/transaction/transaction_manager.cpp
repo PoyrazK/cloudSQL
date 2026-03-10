@@ -218,7 +218,8 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                 break;
             }
             case UndoLog::Type::UPDATE: {
-                /* For UPDATE undo, remove new version from indexes/heap and restore old version's xmax/indexes */
+                /* For UPDATE undo, remove new version from indexes/heap and restore old version's
+                 * xmax/indexes */
                 executor::Tuple new_tuple;
                 if (table.get(log.rid, new_tuple)) {
                     for (const auto& idx_info : table_meta->indexes) {
@@ -231,13 +232,15 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                     }
                 }
                 if (!table.physical_remove(log.rid)) {
-                    std::cerr << "Rollback ERROR: physical_remove failed for new version in UPDATE undo\n";
+                    std::cerr << "Rollback ERROR: physical_remove failed for new version in UPDATE "
+                                 "undo\n";
                     success = false;
                 }
 
                 if (log.old_rid.has_value()) {
                     if (!table.undo_remove(log.old_rid.value())) {
-                        std::cerr << "Rollback ERROR: undo_remove failed for old version in UPDATE undo\n";
+                        std::cerr << "Rollback ERROR: undo_remove failed for old version in UPDATE "
+                                     "undo\n";
                         success = false;
                     } else {
                         executor::Tuple old_tuple;
@@ -247,7 +250,8 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                                     uint16_t pos = idx_info.column_positions[0];
                                     common::ValueType ktype = table_meta->columns[pos].type;
                                     storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                                    static_cast<void>(index.insert(old_tuple.get(pos), log.old_rid.value()));
+                                    static_cast<void>(
+                                        index.insert(old_tuple.get(pos), log.old_rid.value()));
                                 }
                             }
                         }
