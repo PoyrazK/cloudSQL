@@ -326,12 +326,12 @@ class HashJoinOperator : public Operator {
 class LimitOperator : public Operator {
    private:
     std::unique_ptr<Operator> child_;
-    uint64_t limit_;
-    uint64_t offset_;
+    int64_t limit_;
+    int64_t offset_;
     uint64_t current_count_ = 0;
 
    public:
-    LimitOperator(std::unique_ptr<Operator> child, uint64_t limit, uint64_t offset = 0);
+    LimitOperator(std::unique_ptr<Operator> child, int64_t limit, int64_t offset = 0);
 
     bool init() override;
     bool open() override;
