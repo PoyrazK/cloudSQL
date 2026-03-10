@@ -162,8 +162,12 @@ bool IndexScanOperator::next(Tuple& out_tuple) {
     while (current_match_index_ < matching_ids_.size()) {
         const auto& tid = matching_ids_[current_match_index_++];
 
+        storage::HeapTable::TupleId rid;
+        rid.page_num = tid.page_num;
+        rid.slot_num = tid.slot_num;
+
         storage::HeapTable::TupleMeta meta;
-        if (table_->get_meta(tid, meta)) {
+        if (table_->get_meta(rid, meta)) {
             /* MVCC Visibility Check */
             bool visible = true;
             const Transaction* const txn = get_txn();
@@ -734,7 +738,7 @@ void HashJoinOperator::add_child(std::unique_ptr<Operator> child) {
 
 /* --- LimitOperator --- */
 
-LimitOperator::LimitOperator(std::unique_ptr<Operator> child, uint64_t limit, uint64_t offset)
+LimitOperator::LimitOperator(std::unique_ptr<Operator> child, int64_t limit, int64_t offset)
     : Operator(OperatorType::Limit, child->get_txn(), child->get_lock_manager()),
       child_(std::move(child)),
       limit_(limit),
@@ -750,9 +754,12 @@ bool LimitOperator::open() {
     }
 
     /* Skip offset rows */
+    current_count_ = 0;
     Tuple tuple;
-    while (current_count_ < offset_ && child_->next(tuple)) {
-        current_count_++;
+    if (offset_ > 0) {
+        while (current_count_ < static_cast<uint64_t>(offset_) && child_->next(tuple)) {
+            current_count_++;
+        }
     }
     current_count_ = 0;
     set_state(ExecState::Open);
@@ -760,7 +767,7 @@ bool LimitOperator::open() {
 }
 
 bool LimitOperator::next(Tuple& out_tuple) {
-    if (current_count_ >= limit_) {
+    if (limit_ >= 0 && current_count_ >= static_cast<uint64_t>(limit_)) {
         set_state(ExecState::Done);
         return false;
     }
