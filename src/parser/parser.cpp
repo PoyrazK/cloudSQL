@@ -248,18 +248,24 @@ std::unique_ptr<Statement> Parser::parse_select() {
     }
 
     /* LIMIT and OFFSET */
+    bool limit_set = false;
+    bool offset_set = false;
     while (true) {
         if (consume(TokenType::Limit)) {
+            if (limit_set) return nullptr;
             const Token val = next_token();
             if (val.type() == TokenType::Number) {
                 stmt->set_limit(val.as_int64());
+                limit_set = true;
             } else {
                 return nullptr;
             }
         } else if (consume(TokenType::Offset)) {
+            if (offset_set) return nullptr;
             const Token val = next_token();
             if (val.type() == TokenType::Number) {
                 stmt->set_offset(val.as_int64());
+                offset_set = true;
             } else {
                 return nullptr;
             }
