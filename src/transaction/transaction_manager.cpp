@@ -178,12 +178,14 @@ void TransactionManager::undo_transaction(Transaction* txn) {
                 static_cast<void>(table.physical_remove(log.rid));
                 break;
             case UndoLog::Type::DELETE:
-                /* TODO: Implement DELETE undo */
-                static_cast<void>(0);
+                static_cast<void>(table.undo_remove(log.rid));
                 break;
             case UndoLog::Type::UPDATE:
-                /* TODO: Implement UPDATE undo */
-                static_cast<void>(1);
+                /* For update, we physically remove the new version and reset xmax on the old one */
+                static_cast<void>(table.physical_remove(log.rid));
+                if (log.old_rid.has_value()) {
+                    static_cast<void>(table.undo_remove(log.old_rid.value()));
+                }
                 break;
         }
     }

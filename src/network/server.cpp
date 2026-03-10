@@ -335,6 +335,8 @@ void Server::handle_connection(int client_fd) {
     static_cast<void>(send(client_fd, ready.data(), ready.size(), 0));
 
     // 2. Query Loop
+    executor::QueryExecutor exec(catalog_, bpm_, lock_manager_, transaction_manager_);
+
     while (true) {
         char type = 0;
         n = recv(client_fd, &type, 1, 0);
@@ -365,8 +367,6 @@ void Server::handle_connection(int client_fd) {
                         executor::DistributedExecutor dist_exec(catalog_, *cluster_manager_);
                         res = dist_exec.execute(*stmt, sql);
                     } else {
-                        executor::QueryExecutor exec(catalog_, bpm_, lock_manager_,
-                                                     transaction_manager_);
                         res = exec.execute(*stmt);
                     }
 
