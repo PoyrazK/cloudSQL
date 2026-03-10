@@ -165,6 +165,9 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
         const auto& log = *it;
         auto table_meta_opt = catalog_.get_table_by_name(log.table_name);
         if (!table_meta_opt) {
+            std::cerr << "Rollback ERROR: Table metadata not found for '" << log.table_name
+                      << "' during undo. Transaction: " << txn->get_id() << "\n";
+            success = false;
             continue;
         }
         const auto* table_meta = table_meta_opt.value();
@@ -187,7 +190,12 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                             uint16_t pos = idx_info.column_positions[0];
                             common::ValueType ktype = table_meta->columns[pos].type;
                             storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                            static_cast<void>(index.remove(tuple.get(pos), log.rid));
+                            if (!index.remove(tuple.get(pos), log.rid)) {
+                                std::cerr << "Rollback ERROR: Index remove failed for table '"
+                                          << log.table_name << "', index '" << idx_info.name
+                                          << "'\n";
+                                success = false;
+                            }
                         }
                     }
                 }
@@ -210,7 +218,12 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                                 uint16_t pos = idx_info.column_positions[0];
                                 common::ValueType ktype = table_meta->columns[pos].type;
                                 storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                                static_cast<void>(index.insert(tuple.get(pos), log.rid));
+                                if (!index.insert(tuple.get(pos), log.rid)) {
+                                    std::cerr << "Rollback ERROR: Index insert failed for table '"
+                                              << log.table_name << "', index '" << idx_info.name
+                                              << "'\n";
+                                    success = false;
+                                }
                             }
                         }
                     }
@@ -227,7 +240,12 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                             uint16_t pos = idx_info.column_positions[0];
                             common::ValueType ktype = table_meta->columns[pos].type;
                             storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                            static_cast<void>(index.remove(new_tuple.get(pos), log.rid));
+                            if (!index.remove(new_tuple.get(pos), log.rid)) {
+                                std::cerr << "Rollback ERROR: Index remove failed for table '"
+                                          << log.table_name << "', index '" << idx_info.name
+                                          << "'\n";
+                                success = false;
+                            }
                         }
                     }
                 }
@@ -250,8 +268,12 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                                     uint16_t pos = idx_info.column_positions[0];
                                     common::ValueType ktype = table_meta->columns[pos].type;
                                     storage::BTreeIndex index(idx_info.name, bpm_, ktype);
-                                    static_cast<void>(
-                                        index.insert(old_tuple.get(pos), log.old_rid.value()));
+                                    if (!index.insert(old_tuple.get(pos), log.old_rid.value())) {
+                                        std::cerr << "Rollback ERROR: Index insert failed for table '"
+                                                  << log.table_name << "', index '" << idx_info.name
+                                                  << "'\n";
+                                        success = false;
+                                    }
                                 }
                             }
                         }

@@ -7,6 +7,7 @@
 #define CLOUDSQL_TRANSACTION_TRANSACTION_HPP
 
 #include <atomic>
+#include <cassert>
 #include <mutex>
 #include <optional>
 #include <unordered_set>
@@ -123,6 +124,7 @@ class Transaction {
     void add_undo_log(UndoLog::Type type, const std::string& table_name,
                       const storage::HeapTable::TupleId& rid) {
         /* Enforce invariant: non-UPDATE types should not provide old_rid through this overload */
+        assert(type != UndoLog::Type::UPDATE);
         undo_logs_.push_back({type, table_name, rid, std::nullopt});
     }
 
@@ -130,6 +132,7 @@ class Transaction {
                       const storage::HeapTable::TupleId& rid,
                       const storage::HeapTable::TupleId& old_rid) {
         /* Enforce invariant: this overload is primarily for UPDATE types providing old_rid */
+        assert(type == UndoLog::Type::UPDATE);
         undo_logs_.push_back({type, table_name, rid, old_rid});
     }
 
