@@ -74,6 +74,7 @@ class QueryExecutor {
 
     QueryResult execute_select(const parser::SelectStatement& stmt, transaction::Transaction* txn);
     QueryResult execute_create_table(const parser::CreateTableStatement& stmt);
+    QueryResult execute_create_index(const parser::CreateIndexStatement& stmt);
     QueryResult execute_drop_table(const parser::DropTableStatement& stmt);
     QueryResult execute_drop_index(const parser::DropIndexStatement& stmt);
     QueryResult execute_insert(const parser::InsertStatement& stmt, transaction::Transaction* txn);
