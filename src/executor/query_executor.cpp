@@ -534,7 +534,8 @@ QueryResult QueryExecutor::execute_delete(const parser::DeleteStatement& stmt,
         /* Retrieve old tuple for logging and index maintenance (unconditional) */
         Tuple old_tuple;
         if (!table.get(rid, old_tuple)) {
-            result.set_error("Failed to retrieve tuple for deletion maintenance: " + rid.to_string());
+            result.set_error("Failed to retrieve tuple for deletion maintenance: " +
+                             rid.to_string());
             return result;
         }
 

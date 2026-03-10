@@ -269,9 +269,10 @@ bool TransactionManager::undo_transaction(Transaction* txn) {
                                     common::ValueType ktype = table_meta->columns[pos].type;
                                     storage::BTreeIndex index(idx_info.name, bpm_, ktype);
                                     if (!index.insert(old_tuple.get(pos), log.old_rid.value())) {
-                                        std::cerr << "Rollback ERROR: Index insert failed for table '"
-                                                  << log.table_name << "', index '" << idx_info.name
-                                                  << "'\n";
+                                        std::cerr
+                                            << "Rollback ERROR: Index insert failed for table '"
+                                            << log.table_name << "', index '" << idx_info.name
+                                            << "'\n";
                                         success = false;
                                     }
                                 }
