@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -38,6 +39,29 @@
 #include "transaction/transaction_manager.hpp"
 
 namespace cloudsql::executor {
+
+namespace {
+enum class IndexOp { Insert, Remove };
+
+/**
+ * @brief Helper to perform index writes and check for success
+ */
+bool apply_index_write(storage::BTreeIndex& index, const common::Value& key,
+                       const storage::HeapTable::TupleId& rid, IndexOp op, std::string& error_msg) {
+    bool success = false;
+    if (op == IndexOp::Insert) {
+        success = index.insert(key, rid);
+    } else {
+        success = index.remove(key, rid);
+    }
+
+    if (!success) {
+        error_msg = "Index operation failed for key: " + key.to_string();
+        return false;
+    }
+    return true;
+}
+}  // namespace
 
 void ShardStateMachine::apply(const raft::LogEntry& entry) {
     if (entry.data.empty()) return;
@@ -93,6 +117,12 @@ QueryExecutor::QueryExecutor(Catalog& catalog, storage::BufferPoolManager& bpm,
       log_manager_(log_manager),
       cluster_manager_(cluster_manager) {}
 
+QueryExecutor::~QueryExecutor() {
+    if (current_txn_ != nullptr) {
+        transaction_manager_.abort(current_txn_);
+    }
+}
+
 QueryResult QueryExecutor::execute(const parser::Statement& stmt) {
     const auto start = std::chrono::high_resolution_clock::now();
     QueryResult result;
@@ -123,6 +153,8 @@ QueryResult QueryExecutor::execute(const parser::Statement& stmt) {
             result = execute_select(dynamic_cast<const parser::SelectStatement&>(stmt), txn);
         } else if (stmt.type() == parser::StmtType::CreateTable) {
             result = execute_create_table(dynamic_cast<const parser::CreateTableStatement&>(stmt));
+        } else if (stmt.type() == parser::StmtType::CreateIndex) {
+            result = execute_create_index(dynamic_cast<const parser::CreateIndexStatement&>(stmt));
         } else if (stmt.type() == parser::StmtType::DropTable) {
             result = execute_drop_table(dynamic_cast<const parser::DropTableStatement&>(stmt));
         } else if (stmt.type() == parser::StmtType::DropIndex) {
@@ -268,6 +300,82 @@ QueryResult QueryExecutor::execute_create_table(const parser::CreateTableStateme
     return result;
 }
 
+QueryResult QueryExecutor::execute_create_index(const parser::CreateIndexStatement& stmt) {
+    QueryResult result;
+
+    /* Reject composite indexes */
+    if (stmt.columns().size() != 1) {
+        result.set_error("Composite indexes not supported");
+        return result;
+    }
+
+    auto table_meta_opt = catalog_.get_table_by_name(stmt.table_name());
+    if (!table_meta_opt.has_value()) {
+        result.set_error("Table not found: " + stmt.table_name());
+        return result;
+    }
+    const auto* table_meta = table_meta_opt.value();
+
+    std::vector<uint16_t> col_positions;
+    common::ValueType key_type = common::ValueType::TYPE_NULL;
+
+    const auto& col_name = stmt.columns()[0];
+    bool found = false;
+    for (const auto& col : table_meta->columns) {
+        if (col.name == col_name) {
+            col_positions.push_back(col.position);
+            key_type = col.type;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        result.set_error("Column not found: " + col_name);
+        return result;
+    }
+
+    /* Update Catalog */
+    const oid_t index_id = catalog_.create_index(stmt.index_name(), table_meta->table_id,
+                                                 col_positions, IndexType::BTree, stmt.unique());
+    if (index_id == 0) {
+        result.set_error("Failed to create index in catalog");
+        return result;
+    }
+
+    /* Create Physical Index File */
+    storage::BTreeIndex index(stmt.index_name(), bpm_, key_type);
+    if (!index.create()) {
+        static_cast<void>(catalog_.drop_index(index_id));
+        result.set_error("Failed to create index file");
+        return result;
+    }
+
+    /* Populate Index with existing data (Backfill) */
+    Schema schema;
+    for (const auto& col : table_meta->columns) {
+        schema.add_column(col.name, col.type);
+    }
+    storage::HeapTable table(stmt.table_name(), bpm_, schema);
+    auto iter = table.scan();
+    storage::HeapTable::TupleMeta meta;
+    std::string err;
+    while (iter.next_meta(meta)) {
+        if (meta.xmax == 0) {
+            /* Extract key from tuple */
+            const common::Value& key = meta.tuple.get(col_positions[0]);
+            if (!apply_index_write(index, key, iter.current_id(), IndexOp::Insert, err)) {
+                static_cast<void>(index.drop());
+                static_cast<void>(catalog_.drop_index(index_id));
+                result.set_error(err);
+                return result;
+            }
+        }
+    }
+
+    result.set_rows_affected(1);
+    return result;
+}
+
 QueryResult QueryExecutor::execute_insert(const parser::InsertStatement& stmt,
                                           transaction::Transaction* txn) {
     QueryResult result;
@@ -327,6 +435,19 @@ QueryResult QueryExecutor::execute_insert(const parser::InsertStatement& stmt,
         }
 
         const auto tid = table.insert(tuple, xmin);
+
+        /* Update Indexes */
+        std::string err;
+        for (const auto& idx_info : table_meta->indexes) {
+            if (!idx_info.column_positions.empty()) {
+                uint16_t pos = idx_info.column_positions[0];
+                common::ValueType ktype = table_meta->columns[pos].type;
+                storage::BTreeIndex index(idx_info.name, bpm_, ktype);
+                if (!apply_index_write(index, tuple.get(pos), tid, IndexOp::Insert, err)) {
+                    throw std::runtime_error(err);
+                }
+            }
+        }
 
         /* Log INSERT */
         if (log_manager_ != nullptr && txn != nullptr) {
@@ -410,13 +531,31 @@ QueryResult QueryExecutor::execute_delete(const parser::DeleteStatement& stmt,
             }
         }
 
-        /* Retrieve old tuple for logging */
+        /* Retrieve old tuple for logging and index maintenance (unconditional) */
         Tuple old_tuple;
-        if (log_manager_ != nullptr && txn != nullptr) {
-            static_cast<void>(table.get(rid, old_tuple));
+        if (!table.get(rid, old_tuple)) {
+            result.set_error("Failed to retrieve tuple for deletion maintenance: " +
+                             rid.to_string());
+            return result;
         }
 
         if (table.remove(rid, xmax)) {
+            /* Update Indexes */
+            std::string err;
+            if (!old_tuple.empty()) {
+                for (const auto& idx_info : table_meta->indexes) {
+                    if (!idx_info.column_positions.empty()) {
+                        uint16_t pos = idx_info.column_positions[0];
+                        common::ValueType ktype = table_meta->columns[pos].type;
+                        storage::BTreeIndex index(idx_info.name, bpm_, ktype);
+                        if (!apply_index_write(index, old_tuple.get(pos), rid, IndexOp::Remove,
+                                               err)) {
+                            throw std::runtime_error(err);
+                        }
+                    }
+                }
+            }
+
             /* Log DELETE */
             if (log_manager_ != nullptr && txn != nullptr) {
                 recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(),
@@ -460,6 +599,7 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
     /* Phase 1: Collect RIDs and compute new values to avoid Halloween Problem */
     struct UpdateOp {
         storage::HeapTable::TupleId rid;
+        Tuple old_tuple;
         Tuple new_tuple;
     };
     std::vector<UpdateOp> updates;
@@ -482,29 +622,50 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
                     new_tuple.set(idx, val_expr->evaluate(&meta.tuple, &schema));
                 }
             }
-            updates.push_back({iter.current_id(), std::move(new_tuple)});
+            updates.push_back({iter.current_id(), meta.tuple, std::move(new_tuple)});
         }
     }
 
     /* Phase 2: Apply Updates */
     for (const auto& op : updates) {
-        /* Retrieve old tuple for logging */
-        Tuple old_tuple;
-        if (log_manager_ != nullptr && txn != nullptr) {
-            static_cast<void>(table.get(op.rid, old_tuple));
-        }
-
         if (table.remove(op.rid, txn_id)) {
+            /* Update Indexes - Remove old, Insert new */
+            std::string err;
+            for (const auto& idx_info : table_meta->indexes) {
+                if (!idx_info.column_positions.empty()) {
+                    uint16_t pos = idx_info.column_positions[0];
+                    common::ValueType ktype = table_meta->columns[pos].type;
+                    storage::BTreeIndex index(idx_info.name, bpm_, ktype);
+                    if (!apply_index_write(index, op.old_tuple.get(pos), op.rid, IndexOp::Remove,
+                                           err)) {
+                        throw std::runtime_error(err);
+                    }
+                }
+            }
+
             /* Log DELETE part of update */
             if (log_manager_ != nullptr && txn != nullptr) {
                 recovery::LogRecord log(txn->get_id(), txn->get_prev_lsn(),
                                         recovery::LogRecordType::MARK_DELETE, table_name, op.rid,
-                                        old_tuple);
+                                        op.old_tuple);
                 const auto lsn = log_manager_->append_log_record(log);
                 txn->set_prev_lsn(lsn);
             }
 
             const auto new_tid = table.insert(op.new_tuple, txn_id);
+
+            /* Update Indexes - Insert new */
+            for (const auto& idx_info : table_meta->indexes) {
+                if (!idx_info.column_positions.empty()) {
+                    uint16_t pos = idx_info.column_positions[0];
+                    common::ValueType ktype = table_meta->columns[pos].type;
+                    storage::BTreeIndex index(idx_info.name, bpm_, ktype);
+                    if (!apply_index_write(index, op.new_tuple.get(pos), new_tid, IndexOp::Insert,
+                                           err)) {
+                        throw std::runtime_error(err);
+                    }
+                }
+            }
 
             /* Log INSERT part of update */
             if (log_manager_ != nullptr && txn != nullptr) {
@@ -516,8 +677,7 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
             }
 
             if (txn != nullptr) {
-                txn->add_undo_log(transaction::UndoLog::Type::UPDATE, table_name, op.rid);
-                txn->add_undo_log(transaction::UndoLog::Type::INSERT, table_name, new_tid);
+                txn->add_undo_log(transaction::UndoLog::Type::UPDATE, table_name, new_tid, op.rid);
             }
             rows_updated++;
         }
@@ -529,7 +689,7 @@ QueryResult QueryExecutor::execute_update(const parser::UpdateStatement& stmt,
 
 std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatement& stmt,
                                                     transaction::Transaction* txn) {
-    /* 1. Base: SeqScan of the initial table */
+    /* 1. Base: Initial table access (Sequential Scan or Index Scan) */
     if (!stmt.from()) {
         return nullptr;
     }
@@ -540,9 +700,7 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
     if (cluster_manager_ != nullptr &&
         cluster_manager_->has_shuffle_data(context_id_, base_table_name)) {
         auto data = cluster_manager_->fetch_shuffle_data(context_id_, base_table_name);
-        /* We need a schema for the buffered data. For simplicity, we assume
-         * the first table in the FROM clause has a catalog entry we can use.
-         */
+        /* We need a schema for the buffered data. */
         auto meta_opt = catalog_.get_table_by_name(base_table_name);
         Schema buffer_schema;
         if (meta_opt.has_value()) {
@@ -565,9 +723,60 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
         base_schema.add_column(col.name, col.type);
     }
 
-    std::unique_ptr<Operator> current_root = std::make_unique<SeqScanOperator>(
-        std::make_unique<storage::HeapTable>(base_table_name, bpm_, base_schema), txn,
-        &lock_manager_);
+    /* Index Selection Optimization:
+     * If there's a simple equality filter on an indexed column, use IndexScanOperator.
+     */
+    std::unique_ptr<Operator> current_root = nullptr;
+    bool index_used = false;
+
+    if (stmt.where() && stmt.where()->type() == parser::ExprType::Binary && stmt.joins().empty()) {
+        const auto* bin_expr = dynamic_cast<const parser::BinaryExpr*>(stmt.where());
+        if (bin_expr->op() == parser::TokenType::Eq) {
+            std::string col_name;
+            common::Value const_val;
+            bool eligible = false;
+
+            if (bin_expr->left().type() == parser::ExprType::Column &&
+                bin_expr->right().type() == parser::ExprType::Constant) {
+                col_name = bin_expr->left().to_string();
+                const_val = bin_expr->right().evaluate();
+                eligible = true;
+            } else if (bin_expr->right().type() == parser::ExprType::Column &&
+                       bin_expr->left().type() == parser::ExprType::Constant) {
+                col_name = bin_expr->right().to_string();
+                const_val = bin_expr->left().evaluate();
+                eligible = true;
+            }
+
+            if (eligible) {
+                /* Check if col_name is indexed */
+                for (const auto& idx_info : base_table_meta->indexes) {
+                    if (!idx_info.column_positions.empty()) {
+                        uint16_t pos = idx_info.column_positions[0];
+                        /* Handle both qualified and unqualified names */
+                        if (base_table_meta->columns[pos].name == col_name ||
+                            (base_table_name + "." + base_table_meta->columns[pos].name) ==
+                                col_name) {
+                            common::ValueType ktype = base_table_meta->columns[pos].type;
+                            current_root = std::make_unique<IndexScanOperator>(
+                                std::make_unique<storage::HeapTable>(base_table_name, bpm_,
+                                                                     base_schema),
+                                std::make_unique<storage::BTreeIndex>(idx_info.name, bpm_, ktype),
+                                std::move(const_val), txn, &lock_manager_);
+                            index_used = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!index_used) {
+        current_root = std::make_unique<SeqScanOperator>(
+            std::make_unique<storage::HeapTable>(base_table_name, bpm_, base_schema), txn,
+            &lock_manager_);
+    }
 
     /* 2. Add JOINs */
     for (const auto& join : stmt.joins()) {
@@ -604,11 +813,6 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
                 std::make_unique<storage::HeapTable>(join_table_name, bpm_, join_schema), txn,
                 &lock_manager_);
         }
-
-        /* For now, we use HashJoin if a condition exists, otherwise NestedLoop would be needed.
-         * Note: HashJoin requires equality condition. We'll assume equality for now or default to
-         * NLJ. Currently cloudSQL only has HashJoin implemented in operator.cpp.
-         */
 
         bool use_hash_join = false;
         std::unique_ptr<parser::Expression> left_key = nullptr;
@@ -667,8 +871,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
         }
     }
 
-    /* 3. Filter (WHERE) */
-    if (stmt.where()) {
+    /* 3. Filter (WHERE) - Only if not already handled by IndexScan */
+    if (stmt.where() && !index_used) {
         current_root =
             std::make_unique<FilterOperator>(std::move(current_root), stmt.where()->clone());
     }

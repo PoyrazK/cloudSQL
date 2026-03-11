@@ -1,0 +1,85 @@
+# Transaction Tests
+
+statement ok
+CREATE TABLE txn_test (id INT, val TEXT);
+
+# 1. Basic Commit
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO txn_test VALUES (1, 'commit_me');
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 1;
+----
+1 commit_me
+
+statement ok
+COMMIT;
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 1;
+----
+1 commit_me
+
+# 2. Basic Rollback
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO txn_test VALUES (2, 'rollback_me');
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 2;
+----
+2 rollback_me
+
+statement ok
+ROLLBACK;
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 2;
+----
+
+# 3. Visibility of Updates within Transaction
+statement ok
+BEGIN;
+
+statement ok
+UPDATE txn_test SET val = 'updated' WHERE id = 1;
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 1;
+----
+1 updated
+
+statement ok
+ROLLBACK;
+
+query IT
+SELECT id, val FROM txn_test WHERE id = 1;
+----
+1 commit_me
+
+# 4. Delete within transaction and rollback
+statement ok
+BEGIN;
+
+statement ok
+DELETE FROM txn_test WHERE id = 1;
+
+query IT
+SELECT * FROM txn_test;
+----
+
+statement ok
+ROLLBACK;
+
+query IT
+SELECT id, val FROM txn_test;
+----
+1 commit_me
+
+statement ok
+DROP TABLE txn_test;

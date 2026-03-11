@@ -12,7 +12,7 @@ INSERT INTO users_j VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie');
 statement ok
 INSERT INTO orders_j VALUES (101, 1, 50.0), (102, 1, 25.0), (103, 2, 100.0);
 
-# Inner Join
+# 1. Inner Join
 query TR
 SELECT users_j.name, orders_j.amount FROM users_j JOIN orders_j ON users_j.id = orders_j.user_id ORDER BY orders_j.amount;
 ----
@@ -20,13 +20,13 @@ Alice 25.0
 Alice 50.0
 Bob 100.0
 
-# Join with where
+# 2. Join with where
 query TI
 SELECT users_j.name, orders_j.id FROM users_j JOIN orders_j ON users_j.id = orders_j.user_id WHERE orders_j.amount > 60;
 ----
 Bob 103
 
-# Left Join (Charlie has no orders)
+# 3. Left Join (Charlie has no orders)
 query TR
 SELECT users_j.name, orders_j.amount FROM users_j LEFT JOIN orders_j ON users_j.id = orders_j.user_id ORDER BY users_j.name, orders_j.amount;
 ----
@@ -34,6 +34,29 @@ Alice 25.0
 Alice 50.0
 Bob 100.0
 Charlie NULL
+
+# 4. Add an order with no user
+statement ok
+INSERT INTO orders_j VALUES (104, 99, 75.0);
+
+# 5. Right Join (User 99 doesn't exist)
+query TRR
+SELECT users_j.name, orders_j.amount, orders_j.id FROM users_j RIGHT JOIN orders_j ON users_j.id = orders_j.user_id ORDER BY orders_j.amount;
+----
+Alice 25.0 102
+Alice 50.0 101
+NULL 75.0 104
+Bob 100.0 103
+
+# 6. Full Join (Charlie has no orders, User 99 doesn't exist)
+query TRR
+SELECT users_j.name, orders_j.amount, orders_j.id FROM users_j FULL JOIN orders_j ON users_j.id = orders_j.user_id ORDER BY users_j.name, orders_j.amount;
+----
+Alice 25.0 102
+Alice 50.0 101
+Bob 100.0 103
+Charlie NULL NULL
+NULL 75.0 104
 
 statement ok
 DROP TABLE users_j;

@@ -129,10 +129,23 @@ std::unique_ptr<Statement> Parser::parse_select() {
             if (consume(TokenType::Join)) {
                 join_type = SelectStatement::JoinType::Inner;
             } else if (consume(TokenType::Left)) {
+                static_cast<void>(consume(TokenType::Outer));
                 if (!consume(TokenType::Join)) {
                     return nullptr;
                 }
                 join_type = SelectStatement::JoinType::Left;
+            } else if (consume(TokenType::Right)) {
+                static_cast<void>(consume(TokenType::Outer));
+                if (!consume(TokenType::Join)) {
+                    return nullptr;
+                }
+                join_type = SelectStatement::JoinType::Right;
+            } else if (consume(TokenType::Full)) {
+                static_cast<void>(consume(TokenType::Outer));
+                if (!consume(TokenType::Join)) {
+                    return nullptr;
+                }
+                join_type = SelectStatement::JoinType::Full;
             } else {
                 break;
             }
@@ -234,23 +247,30 @@ std::unique_ptr<Statement> Parser::parse_select() {
         }
     }
 
-    /* LIMIT */
-    if (consume(TokenType::Limit)) {
-        const Token val = next_token();
-        if (val.type() == TokenType::Number) {
-            stmt->set_limit(val.as_int64());
+    /* LIMIT and OFFSET */
+    bool limit_set = false;
+    bool offset_set = false;
+    while (true) {
+        if (consume(TokenType::Limit)) {
+            if (limit_set) return nullptr;
+            const Token val = next_token();
+            if (val.type() == TokenType::Number) {
+                stmt->set_limit(val.as_int64());
+                limit_set = true;
+            } else {
+                return nullptr;
+            }
+        } else if (consume(TokenType::Offset)) {
+            if (offset_set) return nullptr;
+            const Token val = next_token();
+            if (val.type() == TokenType::Number) {
+                stmt->set_offset(val.as_int64());
+                offset_set = true;
+            } else {
+                return nullptr;
+            }
         } else {
-            return nullptr;
-        }
-    }
-
-    /* OFFSET */
-    if (consume(TokenType::Offset)) {
-        const Token val = next_token();
-        if (val.type() == TokenType::Number) {
-            stmt->set_offset(val.as_int64());
-        } else {
-            return nullptr;
+            break;
         }
     }
 
