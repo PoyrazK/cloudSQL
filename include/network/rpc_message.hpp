@@ -51,16 +51,27 @@ class Serializer {
             return;
         }
 
-        switch (val.type()) {
-            case common::ValueType::TYPE_INT64: {
-                int64_t v = val.as_int64();
+        if (val.is_numeric()) {
+            // POC: unify all numerics to 64-bit float/int in the stream for simplicity
+            if (val.type() == common::ValueType::TYPE_FLOAT32 || val.type() == common::ValueType::TYPE_FLOAT64) {
+                double v = val.to_float64();
                 const size_t offset = out.size();
                 out.resize(offset + VAL_SIZE_64);
                 std::memcpy(out.data() + offset, &v, VAL_SIZE_64);
-                break;
+            } else {
+                int64_t v = val.to_int64();
+                const size_t offset = out.size();
+                out.resize(offset + VAL_SIZE_64);
+                std::memcpy(out.data() + offset, &v, VAL_SIZE_64);
             }
-            case common::ValueType::TYPE_TEXT: {
-                const std::string& s = val.as_text();
+            return;
+        }
+
+        switch (val.type()) {
+            case common::ValueType::TYPE_TEXT:
+            case common::ValueType::TYPE_VARCHAR:
+            case common::ValueType::TYPE_CHAR: {
+                const std::string& s = val.to_string(); // fallback to string for anything else
                 const auto len = static_cast<uint32_t>(s.size());
                 const size_t offset = out.size();
                 out.resize(offset + VAL_SIZE_32 + len);
@@ -82,16 +93,29 @@ class Serializer {
             return common::Value::make_null();
         }
 
-        switch (type) {
-            case common::ValueType::TYPE_INT64: {
-                int64_t v = 0;
-                if (offset + VAL_SIZE_64 <= size) {
-                    std::memcpy(&v, data + offset, VAL_SIZE_64);
-                    offset += VAL_SIZE_64;
-                }
-                return common::Value::make_int64(v);
+        if (type == common::ValueType::TYPE_FLOAT32 || type == common::ValueType::TYPE_FLOAT64) {
+            double v = 0;
+            if (offset + VAL_SIZE_64 <= size) {
+                std::memcpy(&v, data + offset, VAL_SIZE_64);
+                offset += VAL_SIZE_64;
             }
-            case common::ValueType::TYPE_TEXT: {
+            return common::Value::make_float64(v);
+        }
+
+        if (type == common::ValueType::TYPE_INT8 || type == common::ValueType::TYPE_INT16 ||
+            type == common::ValueType::TYPE_INT32 || type == common::ValueType::TYPE_INT64) {
+            int64_t v = 0;
+            if (offset + VAL_SIZE_64 <= size) {
+                std::memcpy(&v, data + offset, VAL_SIZE_64);
+                offset += VAL_SIZE_64;
+            }
+            return common::Value::make_int64(v);
+        }
+
+        switch (type) {
+            case common::ValueType::TYPE_TEXT:
+            case common::ValueType::TYPE_VARCHAR:
+            case common::ValueType::TYPE_CHAR: {
                 uint32_t len = 0;
                 if (offset + VAL_SIZE_32 <= size) {
                     std::memcpy(&len, data + offset, VAL_SIZE_32);
@@ -154,6 +178,33 @@ class Serializer {
         }
         return s;
     }
+
+    static void serialize_schema(const executor::Schema& schema, std::vector<uint8_t>& out) {
+        const auto count = static_cast<uint32_t>(schema.column_count());
+        const size_t offset = out.size();
+        out.resize(offset + VAL_SIZE_32);
+        std::memcpy(out.data() + offset, &count, VAL_SIZE_32);
+        for (size_t i = 0; i < count; ++i) {
+            const auto& col = schema.get_column(i);
+            serialize_string(col.name(), out);
+            out.push_back(static_cast<uint8_t>(col.type()));
+        }
+    }
+
+    static executor::Schema deserialize_schema(const uint8_t* data, size_t& offset, size_t size) {
+        uint32_t count = 0;
+        if (offset + VAL_SIZE_32 <= size) {
+            std::memcpy(&count, data + offset, VAL_SIZE_32);
+            offset += VAL_SIZE_32;
+        }
+        executor::Schema schema;
+        for (uint32_t i = 0; i < count; ++i) {
+            std::string name = deserialize_string(data, offset, size);
+            auto type = static_cast<common::ValueType>(data[offset++]);
+            schema.add_column(name, type);
+        }
+        return schema;
+    }
 };
 
 /**
@@ -204,7 +255,46 @@ struct RpcHeader {
 };
 
 /**
- * @brief Payload for executing a SQL fragment on a data node
+ * @brief Arguments for RegisterNode RPC
+ */
+struct RegisterNodeArgs {
+    std::string id;
+    std::string address;
+    uint16_t port;
+    uint8_t mode; // 0: Standalone, 1: Coordinator, 2: Data
+
+    [[nodiscard]] std::vector<uint8_t> serialize() const {
+        std::vector<uint8_t> out;
+        Serializer::serialize_string(id, out);
+        Serializer::serialize_string(address, out);
+        const size_t offset = out.size();
+        out.resize(offset + 2);
+        uint16_t n_port = htons(port);
+        std::memcpy(out.data() + offset, &n_port, 2);
+        out.push_back(mode);
+        return out;
+    }
+
+    static RegisterNodeArgs deserialize(const std::vector<uint8_t>& in) {
+        RegisterNodeArgs args;
+        size_t offset = 0;
+        args.id = Serializer::deserialize_string(in.data(), offset, in.size());
+        args.address = Serializer::deserialize_string(in.data(), offset, in.size());
+        if (offset + 2 <= in.size()) {
+            uint16_t n_port = 0;
+            std::memcpy(&n_port, in.data() + offset, 2);
+            args.port = ntohs(n_port);
+            offset += 2;
+        }
+        if (offset < in.size()) {
+            args.mode = in[offset];
+        }
+        return args;
+    }
+};
+
+/**
+ * @brief Arguments for ExecuteFragment RPC
  */
 struct ExecuteFragmentArgs {
     std::string sql;
@@ -225,7 +315,7 @@ struct ExecuteFragmentArgs {
         args.sql = Serializer::deserialize_string(in.data(), offset, in.size());
         args.context_id = Serializer::deserialize_string(in.data(), offset, in.size());
         if (offset < in.size()) {
-            args.is_fetch_all = in[offset++] != 0;
+            args.is_fetch_all = in[offset] != 0;
         }
         return args;
     }
@@ -237,12 +327,14 @@ struct ExecuteFragmentArgs {
 struct QueryResultsReply {
     bool success = false;
     std::string error_msg;
+    executor::Schema schema;
     std::vector<executor::Tuple> rows;
 
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;
         out.push_back(success ? 1 : 0);
         Serializer::serialize_string(error_msg, out);
+        Serializer::serialize_schema(schema, out);
 
         const auto row_count = static_cast<uint32_t>(rows.size());
         const size_t offset = out.size();
@@ -265,6 +357,7 @@ struct QueryResultsReply {
         reply.success = in[0] != 0;
         size_t offset = 1;
         reply.error_msg = Serializer::deserialize_string(in.data(), offset, in.size());
+        reply.schema = Serializer::deserialize_schema(in.data(), offset, in.size());
 
         uint32_t row_count = 0;
         if (offset + Serializer::VAL_SIZE_32 <= in.size()) {
@@ -307,7 +400,6 @@ struct PushDataArgs {
         size_t offset = 0;
         args.context_id = Serializer::deserialize_string(in.data(), offset, in.size());
         args.table_name = Serializer::deserialize_string(in.data(), offset, in.size());
-
         uint32_t row_count = 0;
         if (offset + Serializer::VAL_SIZE_32 <= in.size()) {
             std::memcpy(&row_count, in.data() + offset, Serializer::VAL_SIZE_32);
@@ -321,7 +413,7 @@ struct PushDataArgs {
 };
 
 /**
- * @brief Payload for instructing a node to shuffle data based on a key
+ * @brief Arguments for ShuffleFragment RPC
  */
 struct ShuffleFragmentArgs {
     std::string context_id;
@@ -347,10 +439,10 @@ struct ShuffleFragmentArgs {
 };
 
 /**
- * @brief Payload for 2PC Operations (Prepare, Commit, Abort)
+ * @brief Arguments for TxnPrepare/Commit/Abort RPC
  */
 struct TxnOperationArgs {
-    uint64_t txn_id = 0;
+    uint64_t txn_id;
 
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out(8);
@@ -368,15 +460,16 @@ struct TxnOperationArgs {
 };
 
 /**
- * @brief Base class for RPC Payloads
+ * @brief Represents a single RPC call
  */
-class RpcMessage {
-   public:
-    virtual ~RpcMessage() = default;
-    [[nodiscard]] virtual RpcType type() const = 0;
-    [[nodiscard]] virtual std::vector<uint8_t> serialize() const = 0;
+struct RpcMessage {
+    RpcHeader header;
+    std::vector<uint8_t> payload;
 
     RpcMessage() = default;
+    ~RpcMessage() = default;
+
+    // Disable copy/move for message
     RpcMessage(const RpcMessage&) = default;
     RpcMessage& operator=(const RpcMessage&) = default;
     RpcMessage(RpcMessage&&) = default;

@@ -283,6 +283,7 @@ void Server::accept_connections() {
 }
 
 void Server::handle_connection(int client_fd) {
+    std::cerr << "--- [Server] handle_connection CALLED for fd " << client_fd << " ---" << std::endl;
     constexpr size_t PKT_BUF_SIZE = 8192;
     std::array<char, PKT_BUF_SIZE> buffer{};
 
