@@ -126,7 +126,7 @@ void RaftGroup::do_candidate() {
         last_heartbeat_ = std::chrono::system_clock::now();
     }
 
-    auto peers = cluster_manager_.get_coordinators();
+    auto peers = cluster_manager_.get_group_members(group_id_);
     size_t votes = 1;
     const size_t needed = (peers.size() / 2) + 1;
 
@@ -178,7 +178,7 @@ void RaftGroup::do_candidate() {
 }
 
 void RaftGroup::do_leader() {
-    auto peers = cluster_manager_.get_coordinators();
+    auto peers = cluster_manager_.get_group_members(group_id_);
     for (const auto& peer : peers) {
         if (peer.id == node_id_) continue;
 
@@ -256,8 +256,12 @@ void RaftGroup::handle_request_vote(const network::RpcHeader& header,
         resp_h.payload_len = static_cast<uint16_t>(VOTE_REPLY_SIZE);
         char h_buf[network::RpcHeader::HEADER_SIZE];
         resp_h.encode(h_buf);
-        static_cast<void>(send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0));
-        static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+        if (send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0) < 0) {
+            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---" << std::endl;
+        }
+        if (send(client_fd, out.data(), out.size(), 0) < 0) {
+            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---" << std::endl;
+        }
     }
 }
 
@@ -305,8 +309,12 @@ void RaftGroup::handle_append_entries(const network::RpcHeader& header,
         resp_h.payload_len = static_cast<uint16_t>(APPEND_REPLY_SIZE);
         char h_buf[network::RpcHeader::HEADER_SIZE];
         resp_h.encode(h_buf);
-        static_cast<void>(send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0));
-        static_cast<void>(send(client_fd, out.data(), out.size(), 0));
+        if (send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0) < 0) {
+            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---" << std::endl;
+        }
+        if (send(client_fd, out.data(), out.size(), 0) < 0) {
+            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---" << std::endl;
+        }
     }
 }
 
