@@ -128,7 +128,8 @@ class ClusterManager {
             coordinators.push_back(self_node_);
         }
         for (const auto& [id, info] : nodes_) {
-            if (info.role == config::RunMode::Coordinator && info.is_active && id != self_node_.id) {
+            if (info.role == config::RunMode::Coordinator && info.is_active &&
+                id != self_node_.id) {
                 coordinators.push_back(info);
             }
         }

@@ -9,9 +9,9 @@
 #include <future>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
-#include <thread>
 
 #include "catalog/catalog.hpp"
 #include "common/cluster_manager.hpp"
@@ -132,7 +132,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 std::vector<ColumnInfo> catalog_cols;
                 uint16_t pos = 0;
                 for (const auto& col : ct.columns()) {
-                    common::ValueType vtype = common::ValueType::TYPE_INT32; // Simplified for POC
+                    common::ValueType vtype = common::ValueType::TYPE_INT32;  // Simplified for POC
                     if (col.type_ == "TEXT") vtype = common::ValueType::TYPE_TEXT;
                     catalog_cols.emplace_back(col.name_, vtype, pos++);
                 }
@@ -145,7 +145,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 }
             }
 
-            // Explicit forward to data nodes to ensure they have metadata IMMEDIATELY (POC workaround for Raft lag)
+            // Explicit forward to data nodes to ensure they have metadata IMMEDIATELY (POC
+            // workaround for Raft lag)
             network::ExecuteFragmentArgs args;
             args.sql = raw_sql;
             args.context_id = "ddl_sync";
@@ -155,10 +156,11 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 network::RpcClient client(node.address, node.cluster_port);
                 if (client.connect()) {
                     std::vector<uint8_t> resp;
-                    static_cast<void>(client.call(network::RpcType::ExecuteFragment, payload, resp));
+                    static_cast<void>(
+                        client.call(network::RpcType::ExecuteFragment, payload, resp));
                 }
             }
-            
+
             res.set_rows_affected(1);
             // Small sleep after DDL to let things settle
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -357,12 +359,13 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         const auto* insert_stmt = dynamic_cast<const parser::InsertStatement*>(&stmt);
         if (insert_stmt != nullptr && !insert_stmt->values().empty()) {
             std::unordered_map<uint32_t, std::vector<std::vector<std::string>>> partitions;
-            
+
             for (const auto& row_exprs : insert_stmt->values()) {
                 if (row_exprs.empty()) continue;
                 // Assume first column is sharding key
                 if (row_exprs[0]->type() == parser::ExprType::Constant) {
-                    const auto* const_expr = dynamic_cast<const parser::ConstantExpr*>(row_exprs[0].get());
+                    const auto* const_expr =
+                        dynamic_cast<const parser::ConstantExpr*>(row_exprs[0].get());
                     if (const_expr != nullptr) {
                         const common::Value pk_val = const_expr->value();
                         const uint32_t shard_idx = cluster::ShardManager::compute_shard(
@@ -384,11 +387,13 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 const auto& node = data_nodes[shard_idx];
                 network::RpcClient client(node.address, node.cluster_port);
                 if (client.connect()) {
-                    std::string shard_sql = "INSERT INTO " + insert_stmt->table()->to_string() + " VALUES ";
+                    std::string shard_sql =
+                        "INSERT INTO " + insert_stmt->table()->to_string() + " VALUES ";
                     for (size_t i = 0; i < rows.size(); ++i) {
                         shard_sql += "(";
                         for (size_t j = 0; j < rows[i].size(); ++j) {
-                            shard_sql += rows[i][j] + std::string(j == rows[i].size() - 1 ? "" : ", ");
+                            shard_sql +=
+                                rows[i][j] + std::string(j == rows[i].size() - 1 ? "" : ", ");
                         }
                         shard_sql += std::string(")") + (i == rows.size() - 1 ? "" : ", ");
                     }
@@ -411,7 +416,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     errors += "[" + node.id + "] Connect failed; ";
                 }
             }
-            
+
             QueryResult res;
             if (!errors.empty()) res.set_error(errors);
             res.set_rows_affected(total_affected);
@@ -419,14 +424,14 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
         }
     } else if (type == parser::StmtType::Select || type == parser::StmtType::Update ||
                type == parser::StmtType::Delete) {
-        
         bool is_join = false;
         if (type == parser::StmtType::Select) {
             const auto* sel = dynamic_cast<const parser::SelectStatement*>(&stmt);
             if (sel && !sel->joins().empty()) is_join = true;
         }
 
-        // Try shard pruning based on WHERE clause, but ONLY if NOT a join (joins are complex in POC)
+        // Try shard pruning based on WHERE clause, but ONLY if NOT a join (joins are complex in
+        // POC)
         const parser::Expression* where_expr = nullptr;
         if (!is_join) {
             if (type == parser::StmtType::Select) {
@@ -465,7 +470,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
     }
 
     network::ExecuteFragmentArgs fragment_args;
-    // Strip LIMIT/OFFSET from fragment SQL to ensure data nodes return all rows for global processing
+    // Strip LIMIT/OFFSET from fragment SQL to ensure data nodes return all rows for global
+    // processing
     fragment_args.sql = (type == parser::StmtType::Select) ? strip_limit_offset(raw_sql) : raw_sql;
     fragment_args.context_id = context_id;
     auto fragment_payload = fragment_args.serialize();
@@ -526,8 +532,10 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     if (col->type() == parser::ExprType::Function) {
                         const auto* func = dynamic_cast<const parser::FunctionExpr*>(col.get());
                         std::string name = func->name();
-                        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return std::toupper(c); });
-                        if (name == "COUNT" || name == "SUM" || name == "MIN" || name == "MAX" || name == "AVG") {
+                        std::transform(name.begin(), name.end(), name.begin(),
+                                       [](unsigned char c) { return std::toupper(c); });
+                        if (name == "COUNT" || name == "SUM" || name == "MIN" || name == "MAX" ||
+                            name == "AVG") {
                             is_global_aggregate = true;
                             agg_types.push_back(name);
                         } else {
@@ -548,7 +556,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 if (row.size() < agg_types.size()) continue;
                 for (size_t i = 0; i < agg_types.size(); ++i) {
                     if (agg_types[i].empty()) continue;
-                    
+
                     const auto& val = row.get(i);
                     if (val.is_null()) continue;
 
@@ -569,7 +577,7 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     }
                 }
             }
-            
+
             executor::Tuple merged_tuple;
             for (auto& v : final_vals) {
                 merged_tuple.values().push_back(std::move(v));
@@ -587,7 +595,8 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                     if (col_idx == static_cast<size_t>(-1)) {
                         // try unqualified
                         size_t dot = col_name.find_last_of('.');
-                        if (dot != std::string::npos) col_idx = res.schema().find_column(col_name.substr(dot+1));
+                        if (dot != std::string::npos)
+                            col_idx = res.schema().find_column(col_name.substr(dot + 1));
                     }
 
                     if (col_idx == static_cast<size_t>(-1)) {
@@ -595,10 +604,12 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                         col_idx = 0;
                     }
 
-                    if (col_idx != static_cast<size_t>(-1) && col_idx < res.schema().columns().size()) {
-                        std::sort(aggregated_rows.begin(), aggregated_rows.end(), [col_idx](const auto& a, const auto& b) {
-                            return a.get(col_idx) < b.get(col_idx);
-                        });
+                    if (col_idx != static_cast<size_t>(-1) &&
+                        col_idx < res.schema().columns().size()) {
+                        std::sort(aggregated_rows.begin(), aggregated_rows.end(),
+                                  [col_idx](const auto& a, const auto& b) {
+                                      return a.get(col_idx) < b.get(col_idx);
+                                  });
                     }
                 }
             }
@@ -609,15 +620,16 @@ QueryResult DistributedExecutor::execute(const parser::Statement& stmt,
                 if (sel && (sel->has_limit() || sel->has_offset())) {
                     int64_t limit = sel->limit();
                     int64_t offset = sel->offset();
-                    
+
                     if (offset > 0) {
                         if (static_cast<size_t>(offset) >= aggregated_rows.size()) {
                             aggregated_rows.clear();
                         } else {
-                            aggregated_rows.erase(aggregated_rows.begin(), aggregated_rows.begin() + offset);
+                            aggregated_rows.erase(aggregated_rows.begin(),
+                                                  aggregated_rows.begin() + offset);
                         }
                     }
-                    
+
                     if (limit >= 0 && static_cast<size_t>(limit) < aggregated_rows.size()) {
                         aggregated_rows.resize(limit);
                     }

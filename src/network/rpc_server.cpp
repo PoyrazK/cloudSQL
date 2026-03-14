@@ -118,8 +118,9 @@ void RpcServer::handle_client(int client_fd) {
         }
 
         const RpcHeader header = RpcHeader::decode(header_buf.data());
-        std::cerr << "--- [RpcServer] received request type=" << (int)header.type << " payload=" << header.payload_len << " ---" << std::endl;
-        
+        std::cerr << "--- [RpcServer] received request type=" << (int)header.type
+                  << " payload=" << header.payload_len << " ---" << std::endl;
+
         std::vector<uint8_t> payload(header.payload_len);
         if (header.payload_len > 0) {
             if (recv(client_fd, payload.data(), header.payload_len, MSG_WAITALL) <= 0) {
@@ -141,7 +142,8 @@ void RpcServer::handle_client(int client_fd) {
             handler(header, payload, client_fd);
             std::cerr << "--- [RpcServer] handler finished ---" << std::endl;
         } else {
-            std::cerr << "--- [RpcServer] NO HANDLER FOUND for type " << (int)header.type << " ---" << std::endl;
+            std::cerr << "--- [RpcServer] NO HANDLER FOUND for type " << (int)header.type << " ---"
+                      << std::endl;
         }
     }
     static_cast<void>(close(client_fd));

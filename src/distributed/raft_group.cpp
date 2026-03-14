@@ -257,10 +257,12 @@ void RaftGroup::handle_request_vote(const network::RpcHeader& header,
         char h_buf[network::RpcHeader::HEADER_SIZE];
         resp_h.encode(h_buf);
         if (send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0) < 0) {
-            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---" << std::endl;
+            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---"
+                      << std::endl;
         }
         if (send(client_fd, out.data(), out.size(), 0) < 0) {
-            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---" << std::endl;
+            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---"
+                      << std::endl;
         }
     }
 }
@@ -310,10 +312,12 @@ void RaftGroup::handle_append_entries(const network::RpcHeader& header,
         char h_buf[network::RpcHeader::HEADER_SIZE];
         resp_h.encode(h_buf);
         if (send(client_fd, h_buf, network::RpcHeader::HEADER_SIZE, 0) < 0) {
-            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---" << std::endl;
+            std::cerr << "--- [RaftGroup] send header FAILED: " << strerror(errno) << " ---"
+                      << std::endl;
         }
         if (send(client_fd, out.data(), out.size(), 0) < 0) {
-            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---" << std::endl;
+            std::cerr << "--- [RaftGroup] send payload FAILED: " << strerror(errno) << " ---"
+                      << std::endl;
         }
     }
 }

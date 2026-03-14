@@ -53,7 +53,8 @@ class Serializer {
 
         if (val.is_numeric()) {
             // POC: unify all numerics to 64-bit float/int in the stream for simplicity
-            if (val.type() == common::ValueType::TYPE_FLOAT32 || val.type() == common::ValueType::TYPE_FLOAT64) {
+            if (val.type() == common::ValueType::TYPE_FLOAT32 ||
+                val.type() == common::ValueType::TYPE_FLOAT64) {
                 double v = val.to_float64();
                 const size_t offset = out.size();
                 out.resize(offset + VAL_SIZE_64);
@@ -71,7 +72,7 @@ class Serializer {
             case common::ValueType::TYPE_TEXT:
             case common::ValueType::TYPE_VARCHAR:
             case common::ValueType::TYPE_CHAR: {
-                const std::string& s = val.to_string(); // fallback to string for anything else
+                const std::string& s = val.to_string();  // fallback to string for anything else
                 const auto len = static_cast<uint32_t>(s.size());
                 const size_t offset = out.size();
                 out.resize(offset + VAL_SIZE_32 + len);
@@ -261,7 +262,7 @@ struct RegisterNodeArgs {
     std::string id;
     std::string address;
     uint16_t port;
-    uint8_t mode; // 0: Standalone, 1: Coordinator, 2: Data
+    uint8_t mode;  // 0: Standalone, 1: Coordinator, 2: Data
 
     [[nodiscard]] std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> out;

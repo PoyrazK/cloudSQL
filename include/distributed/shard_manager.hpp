@@ -7,9 +7,9 @@
 #define SQL_ENGINE_DISTRIBUTED_SHARD_MANAGER_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "catalog/catalog.hpp"
 #include "common/value.hpp"
@@ -49,7 +49,8 @@ class ShardManager {
     /**
      * @brief Find which data node is responsible for a given shard ID
      */
-    static std::optional<cloudsql::ShardInfo> get_target_node(const cloudsql::TableInfo& table, uint32_t shard_id) {
+    static std::optional<cloudsql::ShardInfo> get_target_node(const cloudsql::TableInfo& table,
+                                                              uint32_t shard_id) {
         for (const auto& shard : table.shards) {
             if (shard.shard_id == shard_id) {
                 return shard;

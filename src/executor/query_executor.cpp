@@ -25,7 +25,6 @@
 #include "distributed/raft_manager.hpp"
 #include "distributed/shard_manager.hpp"
 #include "executor/operator.hpp"
-
 #include "executor/types.hpp"
 #include "network/rpc_message.hpp"
 #include "parser/expression.hpp"
@@ -425,23 +424,26 @@ QueryResult QueryExecutor::execute_insert(const parser::InsertStatement& stmt,
         if (!is_local_only_ && cluster_manager_ != nullptr && !table_meta->shards.empty()) {
             uint32_t shard_id = 0;
             if (!tuple.empty()) {
-                shard_id = cluster::ShardManager::compute_shard(tuple.get(0), static_cast<uint32_t>(table_meta->shards.size()));
+                shard_id = cluster::ShardManager::compute_shard(
+                    tuple.get(0), static_cast<uint32_t>(table_meta->shards.size()));
             }
             auto shard_info_opt = cluster::ShardManager::get_target_node(*table_meta, shard_id);
-            
+
             if (shard_info_opt.has_value()) {
                 const auto& shard_info = shard_info_opt.value();
-                std::cerr << "--- [QueryExecutor] Routing tuple to data node " << shard_info.node_address << " ---" << std::endl;
+                std::cerr << "--- [QueryExecutor] Routing tuple to data node "
+                          << shard_info.node_address << " ---" << std::endl;
                 network::RpcClient client(shard_info.node_address, shard_info.port);
                 if (client.connect()) {
                     network::ExecuteFragmentArgs args;
                     args.context_id = context_id_;
                     // Optimization: Only forward the current row
                     args.sql = "INSERT INTO " + table_name + " VALUES " + tuple.to_string() + ";";
-                    
+
                     std::vector<uint8_t> resp;
                     if (!client.call(network::RpcType::ExecuteFragment, args.serialize(), resp)) {
-                        result.set_error("Failed to forward INSERT to data node " + shard_info.node_address);
+                        result.set_error("Failed to forward INSERT to data node " +
+                                         shard_info.node_address);
                         return result;
                     }
                     auto reply = network::QueryResultsReply::deserialize(resp);
@@ -730,9 +732,11 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
                 buffer_schema.add_column(base_table_name + "." + col.name, col.type);
             }
         }
-        std::cerr << "--- [BuildPlan] Table " << base_table_name << " found in SHUFFLE buffer. Schema size=" << buffer_schema.column_count() << " ---" << std::endl;
-        current_root = std::make_unique<BufferScanOperator>(context_id_, base_table_name, std::move(data),
-                                                            std::move(buffer_schema));
+        std::cerr << "--- [BuildPlan] Table " << base_table_name
+                  << " found in SHUFFLE buffer. Schema size=" << buffer_schema.column_count()
+                  << " ---" << std::endl;
+        current_root = std::make_unique<BufferScanOperator>(
+            context_id_, base_table_name, std::move(data), std::move(buffer_schema));
     } else {
         auto base_table_meta_opt = catalog_.get_table_by_name(base_table_name);
         if (!base_table_meta_opt.has_value()) {
@@ -750,7 +754,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
          */
         bool index_used = false;
 
-        if (stmt.where() && stmt.where()->type() == parser::ExprType::Binary && stmt.joins().empty()) {
+        if (stmt.where() && stmt.where()->type() == parser::ExprType::Binary &&
+            stmt.joins().empty()) {
             const auto* bin_expr = dynamic_cast<const parser::BinaryExpr*>(stmt.where());
             if (bin_expr->op() == parser::TokenType::Eq) {
                 std::string col_name;
@@ -782,7 +787,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
                                 current_root = std::make_unique<IndexScanOperator>(
                                     std::make_unique<storage::HeapTable>(base_table_name, bpm_,
                                                                          base_schema),
-                                    std::make_unique<storage::BTreeIndex>(idx_info.name, bpm_, ktype),
+                                    std::make_unique<storage::BTreeIndex>(idx_info.name, bpm_,
+                                                                          ktype),
                                     std::move(const_val), txn, &lock_manager_);
                                 index_used = true;
                                 break;
@@ -802,7 +808,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
 
     if (!current_root) return nullptr;
 
-    std::cerr << "--- [BuildPlan] Base root schema size=" << current_root->output_schema().column_count() << " ---" << std::endl;
+    std::cerr << "--- [BuildPlan] Base root schema size="
+              << current_root->output_schema().column_count() << " ---" << std::endl;
 
     /* 2. Add JOINs */
     for (const auto& join : stmt.joins()) {
@@ -821,7 +828,9 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
                     buffer_schema.add_column(join_table_name + "." + col.name, col.type);
                 }
             }
-            std::cerr << "--- [BuildPlan] JOIN Table " << join_table_name << " found in SHUFFLE buffer. Schema size=" << buffer_schema.column_count() << " ---" << std::endl;
+            std::cerr << "--- [BuildPlan] JOIN Table " << join_table_name
+                      << " found in SHUFFLE buffer. Schema size=" << buffer_schema.column_count()
+                      << " ---" << std::endl;
             join_scan = std::make_unique<BufferScanOperator>(
                 context_id_, join_table_name, std::move(data), std::move(buffer_schema));
         } else {
@@ -839,7 +848,9 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
             join_scan = std::make_unique<SeqScanOperator>(
                 std::make_unique<storage::HeapTable>(join_table_name, bpm_, join_schema), txn,
                 &lock_manager_);
-            std::cerr << "--- [BuildPlan] JOIN Table " << join_table_name << " from LOCAL. Schema size=" << join_scan->output_schema().column_count() << " ---" << std::endl;
+            std::cerr << "--- [BuildPlan] JOIN Table " << join_table_name
+                      << " from LOCAL. Schema size=" << join_scan->output_schema().column_count()
+                      << " ---" << std::endl;
         }
 
         bool use_hash_join = false;
@@ -893,7 +904,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
             current_root = std::make_unique<HashJoinOperator>(
                 std::move(current_root), std::move(join_scan), std::move(left_key),
                 std::move(right_key), exec_join_type);
-            std::cerr << "--- [BuildPlan] Added HashJoin. Combined schema size=" << current_root->output_schema().column_count() << " ---" << std::endl;
+            std::cerr << "--- [BuildPlan] Added HashJoin. Combined schema size="
+                      << current_root->output_schema().column_count() << " ---" << std::endl;
         } else {
             /* TODO: Implement NestedLoopJoin for non-equality or missing conditions */
             return nullptr;
@@ -986,7 +998,8 @@ std::unique_ptr<Operator> QueryExecutor::build_plan(const parser::SelectStatemen
         }
         current_root =
             std::make_unique<ProjectOperator>(std::move(current_root), std::move(projection));
-        std::cerr << "--- [BuildPlan] Added Projection. Result schema size=" << current_root->output_schema().column_count() << " ---" << std::endl;
+        std::cerr << "--- [BuildPlan] Added Projection. Result schema size="
+                  << current_root->output_schema().column_count() << " ---" << std::endl;
     }
 
     /* 6. Limit */

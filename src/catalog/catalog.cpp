@@ -22,7 +22,6 @@
 
 namespace cloudsql {
 
-
 /**
  * @brief Create a new catalog
  */
@@ -73,13 +72,14 @@ bool Catalog::save(const std::string& filename) const {
  */
 oid_t Catalog::create_table(const std::string& table_name, std::vector<ColumnInfo> columns) {
     std::cerr << "--- [Catalog] create_table CALLED for " << table_name << " ---" << std::endl;
-    
+
     // Compute shards from ClusterManager for serialization
     std::vector<ShardInfo> shards;
     if (cluster_manager_ != nullptr) {
         auto data_nodes = cluster_manager_->get_data_nodes();
         if (!data_nodes.empty()) {
-            std::sort(data_nodes.begin(), data_nodes.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
+            std::sort(data_nodes.begin(), data_nodes.end(),
+                      [](const auto& a, const auto& b) { return a.id < b.id; });
             uint32_t sid = 0;
             for (const auto& node : data_nodes) {
                 ShardInfo shard;
@@ -93,7 +93,8 @@ oid_t Catalog::create_table(const std::string& table_name, std::vector<ColumnInf
 
     if (raft_group_ != nullptr) {
         // Multi-Raft: Replicate DDL via Catalog Raft Group (ID 0)
-        // Serialize command: [Type:1][NameLen:4][Name][ColCount:4][Cols...][ShardCount:4][Shards...]
+        // Serialize command:
+        // [Type:1][NameLen:4][Name][ColCount:4][Cols...][ShardCount:4][Shards...]
         std::vector<uint8_t> cmd;
         cmd.push_back(1);  // Type 1: CreateTable
 
@@ -126,7 +127,7 @@ oid_t Catalog::create_table(const std::string& table_name, std::vector<ColumnInf
         for (const auto& shard : shards) {
             uint32_t addr_len = static_cast<uint32_t>(shard.node_address.size());
             offset = cmd.size();
-            cmd.resize(offset + 4 + addr_len + 4 + 2); 
+            cmd.resize(offset + 4 + addr_len + 4 + 2);
             std::memcpy(cmd.data() + offset, &addr_len, 4);
             std::memcpy(cmd.data() + offset + 4, shard.node_address.data(), addr_len);
             std::memcpy(cmd.data() + offset + 4 + addr_len, &shard.shard_id, 4);
@@ -137,13 +138,15 @@ oid_t Catalog::create_table(const std::string& table_name, std::vector<ColumnInf
             return create_table_local(table_name, std::move(columns), std::move(shards));
         }
     }
-    
+
     return create_table_local(table_name, std::move(columns), std::move(shards));
 }
 
-oid_t Catalog::create_table_local(const std::string& table_name, std::vector<ColumnInfo> columns, std::vector<ShardInfo> shards) {
+oid_t Catalog::create_table_local(const std::string& table_name, std::vector<ColumnInfo> columns,
+                                  std::vector<ShardInfo> shards) {
     if (table_exists_by_name(table_name)) {
-        std::cerr << "--- [Catalog] create_table_local: Table already exists " << table_name << " ---" << std::endl;
+        std::cerr << "--- [Catalog] create_table_local: Table already exists " << table_name
+                  << " ---" << std::endl;
         auto meta_opt = get_table_by_name(table_name);
         return (*meta_opt)->table_id;
     }
@@ -158,7 +161,8 @@ oid_t Catalog::create_table_local(const std::string& table_name, std::vector<Col
     if (table->shards.empty() && cluster_manager_ != nullptr) {
         auto data_nodes = cluster_manager_->get_data_nodes();
         if (!data_nodes.empty()) {
-            std::sort(data_nodes.begin(), data_nodes.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
+            std::sort(data_nodes.begin(), data_nodes.end(),
+                      [](const auto& a, const auto& b) { return a.id < b.id; });
             uint32_t sid = 0;
             for (const auto& node : data_nodes) {
                 ShardInfo shard;
@@ -178,7 +182,8 @@ oid_t Catalog::create_table_local(const std::string& table_name, std::vector<Col
         table->shards.push_back(shard);
     }
 
-    std::cerr << "--- [Catalog] Table " << table_name << " initialized with " << table->shards.size() << " shards ---" << std::endl;
+    std::cerr << "--- [Catalog] Table " << table_name << " initialized with "
+              << table->shards.size() << " shards ---" << std::endl;
 
     const oid_t id = table->table_id;
     tables_[id] = std::move(table);
@@ -215,12 +220,13 @@ bool Catalog::drop_table_local(oid_t table_id) {
 
 void Catalog::apply(const raft::LogEntry& entry) {
     if (entry.data.empty()) return;
-    std::cerr << "--- [Catalog] apply CALLED for entry type " << (int)entry.data[0] << " ---" << std::endl;
+    std::cerr << "--- [Catalog] apply CALLED for entry type " << (int)entry.data[0] << " ---"
+              << std::endl;
 
     uint8_t type = entry.data[0];
     if (type == 1) {  // CreateTable
         size_t offset = 1;
-        
+
         uint32_t name_len = 0;
         std::memcpy(&name_len, entry.data.data() + offset, 4);
         offset += 4;
@@ -296,13 +302,13 @@ std::optional<TableInfo*> Catalog::get_table_by_name(const std::string& table_na
             return pair.second.get();
         }
     }
-    
+
     std::cerr << "--- [Catalog] Table NOT FOUND: " << table_name << ". Catalog contains: ";
     for (auto& pair : tables_) {
         std::cerr << pair.second->name << ", ";
     }
     std::cerr << " ---" << std::endl;
-    
+
     return std::nullopt;
 }
 

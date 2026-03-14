@@ -193,7 +193,8 @@ class Catalog : public raft::RaftStateMachine {
     /**
      * @brief Local-only table creation (called by Raft)
      */
-    oid_t create_table_local(const std::string& table_name, std::vector<ColumnInfo> columns, std::vector<ShardInfo> shards = {});
+    oid_t create_table_local(const std::string& table_name, std::vector<ColumnInfo> columns,
+                             std::vector<ShardInfo> shards = {});
 
     /**
      * @brief Drop a table

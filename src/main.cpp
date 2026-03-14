@@ -9,6 +9,8 @@
  * @date 2024
  */
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -21,7 +23,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
 #include "catalog/catalog.hpp"
@@ -248,7 +249,8 @@ int main(int argc, char* argv[]) {
             cluster_manager->add_node_to_group(0, node_id);
 
             /* Register Seed Nodes if in Coordinator Mode */
-            if (config.mode == cloudsql::config::RunMode::Coordinator && !config.seed_nodes.empty()) {
+            if (config.mode == cloudsql::config::RunMode::Coordinator &&
+                !config.seed_nodes.empty()) {
                 std::stringstream ss(config.seed_nodes);
                 std::string node_addr;
                 while (std::getline(ss, node_addr, ',')) {
@@ -274,25 +276,27 @@ int main(int argc, char* argv[]) {
                         rargs.id = info.id;
                         rargs.address = info.address;
                         rargs.port = info.cluster_port;
-                        rargs.mode = 2; // Data
-                        
+                        rargs.mode = 2;  // Data
+
                         cloudsql::network::RpcClient client(target.address, target.cluster_port);
                         if (client.connect()) {
                             std::vector<uint8_t> resp;
-                            static_cast<void>(client.call(cloudsql::network::RpcType::RegisterNode, rargs.serialize(), resp));
+                            static_cast<void>(client.call(cloudsql::network::RpcType::RegisterNode,
+                                                          rargs.serialize(), resp));
                         }
                     }
                     // Also tell them about the coordinator
                     cloudsql::network::RegisterNodeArgs cargs;
                     cargs.id = node_id;
-                    cargs.address = "127.0.0.1"; // Assume local for POC
+                    cargs.address = "127.0.0.1";  // Assume local for POC
                     cargs.port = config.cluster_port;
-                    cargs.mode = 1; // Coordinator
-                    
+                    cargs.mode = 1;  // Coordinator
+
                     cloudsql::network::RpcClient client(target.address, target.cluster_port);
                     if (client.connect()) {
                         std::vector<uint8_t> resp;
-                        static_cast<void>(client.call(cloudsql::network::RpcType::RegisterNode, cargs.serialize(), resp));
+                        static_cast<void>(client.call(cloudsql::network::RpcType::RegisterNode,
+                                                      cargs.serialize(), resp));
                     }
                 }
             }
@@ -313,8 +317,9 @@ int main(int argc, char* argv[]) {
                         (void)h;
                         auto args = cloudsql::network::RegisterNodeArgs::deserialize(p);
                         if (cluster_manager != nullptr) {
-                            cluster_manager->register_node(args.id, args.address, args.port,
-                                                           static_cast<cloudsql::config::RunMode>(args.mode));
+                            cluster_manager->register_node(
+                                args.id, args.address, args.port,
+                                static_cast<cloudsql::config::RunMode>(args.mode));
                         }
                         cloudsql::network::QueryResultsReply reply;
                         reply.success = true;
@@ -324,7 +329,8 @@ int main(int argc, char* argv[]) {
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
                         char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
+                        static_cast<void>(
+                            send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -344,12 +350,12 @@ int main(int argc, char* argv[]) {
                                     *catalog, *bpm, lock_manager, transaction_manager,
                                     log_manager.get(), cluster_manager.get());
                                 exec.set_context_id(args.context_id);
-                                exec.set_local_only(true); // Crucial for fragment execution
+                                exec.set_local_only(true);  // Crucial for fragment execution
                                 auto res = exec.execute(*stmt);
                                 reply.success = res.success();
                                 if (res.success()) {
                                     reply.rows = res.rows();
-                                    reply.schema = res.schema(); // Populate schema for merge logic
+                                    reply.schema = res.schema();  // Populate schema for merge logic
                                 } else {
                                     reply.error_msg = res.error();
                                 }
@@ -368,7 +374,8 @@ int main(int argc, char* argv[]) {
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
                         char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
+                        static_cast<void>(
+                            send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -394,7 +401,8 @@ int main(int argc, char* argv[]) {
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
                         char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
+                        static_cast<void>(
+                            send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -422,7 +430,8 @@ int main(int argc, char* argv[]) {
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
                         char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
+                        static_cast<void>(
+                            send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -450,7 +459,8 @@ int main(int argc, char* argv[]) {
                         resp_h.payload_len = static_cast<uint16_t>(resp_p.size());
                         char h_buf[cloudsql::network::RpcHeader::HEADER_SIZE];
                         resp_h.encode(h_buf);
-                        static_cast<void>(send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
+                        static_cast<void>(
+                            send(fd, h_buf, cloudsql::network::RpcHeader::HEADER_SIZE, 0));
                         static_cast<void>(send(fd, resp_p.data(), resp_p.size(), 0));
                     });
 
@@ -595,7 +605,8 @@ int main(int argc, char* argv[]) {
                     });
             }
 
-            std::cout << "Starting internal RPC server on port " << config.cluster_port << "..." << std::endl;
+            std::cout << "Starting internal RPC server on port " << config.cluster_port << "..."
+                      << std::endl;
             if (!rpc_server->start()) {
                 std::cerr << "Failed to start RPC server" << std::endl;
                 log_manager->stop_flush_thread();
@@ -650,16 +661,18 @@ int main(int argc, char* argv[]) {
                         auto stmt = parser.parse_statement();
                         if (stmt) {
                             if (config.mode == cloudsql::config::RunMode::Coordinator) {
-                                cloudsql::executor::DistributedExecutor dist_exec(*catalog, *cluster_manager);
+                                cloudsql::executor::DistributedExecutor dist_exec(*catalog,
+                                                                                  *cluster_manager);
                                 dist_exec.execute(*stmt, line);
                             } else {
-                                cloudsql::executor::QueryExecutor exec(*catalog, *bpm, lock_manager, 
-                                                                     transaction_manager, log_manager.get(), 
-                                                                     cluster_manager.get());
+                                cloudsql::executor::QueryExecutor exec(
+                                    *catalog, *bpm, lock_manager, transaction_manager,
+                                    log_manager.get(), cluster_manager.get());
                                 exec.execute(*stmt);
                             }
                         }
-                    } catch (...) {}
+                    } catch (...) {
+                    }
                 } else {
                     // EOF reached
                     std::this_thread::sleep_for(std::chrono::seconds(1));

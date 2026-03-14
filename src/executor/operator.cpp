@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -16,7 +17,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 #include "common/value.hpp"
 #include "executor/types.hpp"
