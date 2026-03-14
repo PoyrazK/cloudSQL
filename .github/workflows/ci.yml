@@ -25,7 +25,7 @@ jobs:
       with:
         commit_message: "style: automated clang-format fixes"
 
-  build-and-test:
+  build:
     needs: style-check
     runs-on: ubuntu-latest
     strategy:
@@ -42,7 +42,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache lcov || (sleep 10 && sudo apt-get update && sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache lcov)
+        sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache || (sleep 10 && sudo apt-get update && sudo apt-get install -y cmake clang clang-tidy llvm ninja-build ccache)
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -73,17 +73,51 @@ jobs:
         ninja sqlEngineCore
         ninja
 
-    - name: Run Tests
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.compiler }}-${{ matrix.sanitizer }}
+        path: build/
+        include-hidden-files: true
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [clang++, g++]
+        sanitizer: [address, thread]
+        exclude:
+          - compiler: g++
+            sanitizer: thread
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lcov python3 || (sleep 10 && sudo apt-get update && sudo apt-get install -y lcov python3)
+
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-${{ matrix.compiler }}-${{ matrix.sanitizer }}
+        path: build/
+
+    - name: Restore Permissions
+      run: |
+        chmod +x build/cloudSQL
+        chmod +x build/*_tests || true
+
+    - name: Run Unit Tests
       run: |
         cd build
-        ./cloudSQL_tests
-        ./lock_manager_tests
-        ./server_tests
-        ./transaction_manager_tests
-        ./statement_tests
-        ./recovery_tests
-        ./recovery_manager_tests
-        ./buffer_pool_tests
+        ctest --output-on-failure --parallel $(nproc)
+
+    - name: Run Distributed Tests
+      run: |
+        ./tests/run_dist_test.sh tests/logic/*.slt
 
     - name: Generate Coverage Report
       if: matrix.sanitizer == 'address' && matrix.compiler == 'clang++'
