@@ -97,7 +97,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y lcov python3 || (sleep 10 && sudo apt-get update && sudo apt-get install -y lcov python3)
+        sudo apt-get install -y lcov python3 llvm || (sleep 10 && sudo apt-get update && sudo apt-get install -y lcov python3 llvm)
 
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
